@@ -8,8 +8,9 @@
 // hidden and takes the material of the most opposite side (or the leaf content's
 // material), so the map can be compiled again.
 //
-// The method follows ericw-tools' `bsputil --decompile` (GPL-2.0-or-later); see
-// docs/formats/source-bsp.md for the attribution and the licensing note.
+// The implementation is written for this project from the format description;
+// ericw-tools' `bsputil --decompile` is prior art for the technique (see
+// docs/formats/source-bsp.md for the sources).
 package bsp
 
 import "core:math"

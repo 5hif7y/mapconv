@@ -176,4 +176,9 @@ Next, in rough order:
 
 ## License
 
-TBD.
+MIT. See `LICENSE`.
+
+The BSP world reconstruction is an independent implementation written from the
+format description (leaf regions, plane sets, face clipping); ericw-tools'
+`bsputil --decompile` is prior art for the technique, not code this project
+copied. `docs/formats/source-bsp.md` records that and the format sources used.

@@ -29,8 +29,8 @@ ranges were verified against the `leafbrushes`/`leaffaces` lump lengths of
 ## World geometry is reconstructed, not authored
 
 A compiled BSP no longer stores the mapper's world brushes: the compiler cut the
-world along the BSP tree. Reconstruction follows the method of ericw-tools'
-`bsputil --decompile`:
+world along the BSP tree. The reconstruction here is this project's own
+implementation, written from the format description:
 
 1. every non-empty leaf is the region behind all the planes on the path to it,
    bounded by the model's bounds — that region becomes one convex brush;
@@ -50,14 +50,15 @@ Brush entities are different: their brushes are still in the brush lumps, so the
 are read as authored (planes, sides, texinfo) and attached to the entity through
 its model's leaves.
 
-## Attribution and licensing
+## Sources and licensing
 
-The reconstruction method is ericw-tools' (`bsputil --decompile`), which is
-GPL-2.0-or-later. The BSP struct layouts come from Valve's public Source SDK
-headers (`public/bspfile.h`). This repository's licence is still TBD: if `mapconv`
-is meant to be distributed under a non-GPL licence, this adapter has to be
-re-implemented from the format description or the project licence has to become
-GPL-compatible. That decision is open.
+- Struct layouts and lump ids: Valve's public Source SDK headers
+  (`public/bspfile.h`), used as a format reference.
+- Leaf-region reconstruction, plane filtering and face clipping: an independent
+  implementation written for this project. `ericw-tools`' `bsputil --decompile`
+  (GPL-2.0-or-later) is prior art for the technique and was consulted as a
+  description of the approach; no GPL code was copied.
+- Project licence: MIT (see `LICENSE`).
 
 ## Fidelity
 
