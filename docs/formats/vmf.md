@@ -64,6 +64,12 @@ Ids are allocated per output document: an authored numeric id is reused when it 
 unique, otherwise the next free number is assigned. Face order follows the brush,
 brush order follows the entity, so the output is stable for a given input.
 
+## The entity lump of a BSP
+
+`bsp` parses the entity lump with the same `kv` tree, so the two Source adapters
+share one tokenizer, one escape rule and one preservation policy. A VMF written
+from a BSP round-trips through this adapter unchanged.
+
 ## Fixtures
 
 `tests/fixtures/source/cube.vmf` is authored for this repository: a 128-unit cube

@@ -28,7 +28,7 @@ Usage:
 Options:
   --input <file>       map to read
   --output <file>      map to write (convert only)
-  --from <format>      override the input format: vmf, t3d
+  --from <format>      override the input format: vmf, bsp, t3d
   --to <format>        override the output format: vmf, t3d
   --profile <name>     entity mapping profile (default, source1-to-unreal3,
                        unreal3-to-source1)
@@ -38,6 +38,7 @@ Options:
 
 Supported formats:
   vmf   Source 1 Valve Map Format (text)
+  bsp   Source 1 compiled map (import only)
   t3d   Unreal Engine 3 T3D text interchange
 
 Bidirectional support is implemented for both; conversion is not lossless and
@@ -175,6 +176,8 @@ parse_format :: proc(text: string) -> (format: ir.Format, ok: bool) {
 		return .Unknown, true
 	case "vmf", "source", "source1":
 		return .Source_VMF, true
+	case "bsp", "source-bsp":
+		return .Source_BSP, true
 	case "t3d", "unreal", "unreal3", "ue3":
 		return .Unreal_T3D, true
 	}
@@ -254,10 +257,8 @@ run_validate :: proc(args: Args, text: string) {
 import_only :: proc(text, path: string, format: ir.Format) -> (ir.Document, diag.Diagnostics) {
 	options := convert.Options {
 		from = format,
-		to   = format,
 	}
-	result := convert.convert_text(text, path, options)
-	return result.doc, result.diagnostics
+	return convert.import_only(transmute([]u8)text, path, options)
 }
 
 print_diagnostics :: proc(diagnostics: ^diag.Diagnostics, quiet: bool, report_path: string) {

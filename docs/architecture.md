@@ -18,14 +18,16 @@ format can convert to every other one through the same code path.
 | `xform` | coordinate systems, unit scales, plane/winding/texture-projection transforms | hard-code conversion constants outside the declared systems |
 | `diag` | severity, stable diagnostic codes, deterministic reporting | decide conversion policy |
 | `profile` | entity/material mapping tables per game or engine | perform I/O or geometry work |
-| `vmf` | Valve Map Format tokenizer, block tree, importer, exporter | know about Unreal types |
+| `kv` | Valve key/value block tree (VMF text, BSP entity lump) | interpret format semantics |
+| `vmf` | Valve Map Format importer, exporter | know about Unreal types |
+| `bsp` | Source 1 BSP reader and world reconstruction (import only) | serialise BSP (there is no compiler here) |
 | `t3d` | T3D parser, importer, exporter | know about VMF or Source semantics |
 | `convert` | orchestration, validation, fidelity reporting, inspection | embed format syntax |
 | `main` | CLI, exit codes, report writing | contain conversion logic |
 
-The dependency graph is acyclic: `geom <- ir <- xform`, `vmf`/`t3d` depend on
-`geom`, `ir`, `diag` (and `xform` for their declared frames), `convert` depends on
-the adapters, `main` depends on `convert`.
+The dependency graph is acyclic: `geom <- ir <- xform`, `vmf`/`bsp`/`t3d` depend
+on `geom`, `ir`, `diag` (and `xform` for their declared frames), `kv` is shared by
+`vmf` and `bsp`, `convert` depends on the adapters, `main` depends on `convert`.
 
 ## Invariants
 
@@ -49,7 +51,8 @@ the adapters, `main` depends on `convert`.
 2. If source and target frames differ: build the transform with
    `xform.transform_between`, transform planes, authored windings, entity origins
    and texture projections, then record the source frame's replacement.
-3. Entity mapping through the selected `profile`: classes may be renamed (with a
+3. Entity mapping through the selected `profile`, only when the two formats belong
+   to different engines (`convert.engine_of`). Classes may be renamed (with a
    note), have no actor equivalent (their brushes move to the world), or stay
    unmapped (warning).
 4. Validate: degenerate planes, brushes with too few faces, non-finite

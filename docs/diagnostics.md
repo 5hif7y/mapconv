@@ -85,6 +85,29 @@ entity id, `world.solid[3].side[2]`) and a source location for parsed text.
 | `t3d.dangling-brush`, `t3d.second-worldspawn` | referential problems on export |
 | `t3d.foreign-surface-data` | source-format surface attributes had no T3D spelling |
 
+### `kv.*`
+
+| Code | Meaning |
+| --- | --- |
+| `kv.dangling-word` | bare word without a block or value |
+| `kv.key-without-value` | quoted key not followed by a value |
+| `kv.unclosed-block` | a block reaches end of input without `}` |
+
+### `bsp.*`
+
+| Code | Meaning |
+| --- | --- |
+| `bsp.too-short`, `bsp.bad-ident`, `bsp.unsupported-version` | the file is not a Source 1 BSP version 19/20 |
+| `bsp.lump-out-of-range` | a lump points outside the file and was skipped |
+| `bsp.header` | summary of the parsed lumps |
+| `bsp.no-entities`, `bsp.no-worldspawn`, `bsp.no-models`, `bsp.invalid-headnode` | the map cannot be attributed or decompiled |
+| `bsp.entity-without-class` | entity lump record without `classname` |
+| `bsp.asset-model-reference` | an entity's `model` is an asset path, not a `*N` brush model |
+| `bsp.invalid-brush` | brush index out of range |
+| `bsp.leafs-skipped` | solid leaves that produced no valid brush |
+| `bsp.side-texture-approximated` | a reconstructed side had several textures; the largest face's material was kept |
+| `bsp.displacements` | displacement surfaces present; base surfaces exported |
+
 ### `convert.*`
 
 | Code | Meaning |

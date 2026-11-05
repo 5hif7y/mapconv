@@ -28,6 +28,7 @@ failures.
 | Rotation | `xform/xform_test.odin` — known Source/Unreal rotator values, degree/unit round trip, and a check that both engines' rotation matrices agree after the Y mirror |
 | VMF | `vmf/vmf_test.odin` — tokenizer escapes/comments, plane parsing, texture axes, fixture import (6 faces, materials, entities), unknown-key namespacing, export/import round trip, malformed input, subtractive-CSG warning |
 | T3D | `t3d/t3d_test.odin` — tokenizer quoting, vector/rotation parsing, nesting, fixture import (6 polygons, flags, rotation), export/import round trip, malformed blocks, missing map, polygon-list fragment |
+| BSP | `bsp/bsp_test.odin` — a synthetic Source BSP 20 with an entity brush: lump parsing, texture names, brush sides, leaf/brush ownership, model 1, and rejection of a file without the VBSP signature |
 | Conversion | `convert/convert_test.odin` — format detection, VMF→T3D (units, mapping, transform note), T3D→VMF (brush actors collapse into the world), geometry round trip, subtractive CSG warning, unmapped class/property reporting, light colour and brightness in both directions, rotation in both directions, `targetname`↔`Tag`, unsupported target, validation |
 
 ## Fixtures
@@ -36,6 +37,7 @@ failures.
 | --- | --- | --- |
 | `tests/fixtures/source/cube.vmf` | 128-unit cube, `light`, `info_player_start`, one material, `skyname`, `visgroups`, `viewsettings` | authored for this repository from `docs/formats/vmf.md` |
 | `tests/fixtures/unreal/cube.t3d` | brush actor with six polygons (±128 units), `PointLight`, one material, `Flags=1` | authored for this repository from the UE3 exporter grammar in `docs/formats/t3d.md` |
+| `examples/CSSO maps/**/*.bsp` | 76 real CS:S maps | used manually for BSP smoke tests (`mapconv inspect`/`convert`); not part of the test suite and not redistributed with the repository |
 
 Both are redistributable with the project. Larger, game-specific fixtures should
 be added with provenance and redistribution permission recorded here.

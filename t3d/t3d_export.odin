@@ -100,34 +100,91 @@ export_document :: proc(d: ^ir.Document, dg: ^diag.Diagnostics, opts := DEFAULT_
 	return strings.to_string(w.b)
 }
 
-write_actor :: proc(w: ^Writer, e: ^ir.Entity, d: ^ir.Document, dg: ^diag.Diagnostics) {
-	name := actor_name_for(w, e.class_name, e.id)
-	write_line(w, 1, ir.concat("Begin Actor Class=", e.class_name, " Name=", name))
-	// A brush actor needs its CSG operation on the actor, not on the UModel.
-	if len(e.brushes) > 0 {
-		if first := e.brushes[0]; first >= 0 && first < len(d.brushes) {
-			write_line(w, 2, ir.concat("CsgOper=", csg_op_text(d.brushes[first].op)))
-			for other in e.brushes[1:] {
-				if other >= 0 && other < len(d.brushes) && d.brushes[other].op != d.brushes[first].op {
-					diag.warn(
-						dg,
-						"t3d.mixed-csg-operations",
-						"an actor owns brushes with different CSG operations; Unreal stores only one",
-						name,
-					)
-					break
-				}
+// Prepared_Brush holds the polygon of every face, computed before any text is
+// written so an unwritable brush can be dropped without leaving half a block.
+Prepared_Brush :: struct {
+	windings: [][]geom.Vec3,
+}
+
+prepare_brush :: proc(b: ^ir.Brush, dg: ^diag.Diagnostics, name: string) -> (Prepared_Brush, bool) {
+	prepared := Prepared_Brush {
+		windings = make([][]geom.Vec3, len(b.faces)),
+	}
+	planes := ir.brush_planes(b)
+	defer delete(planes)
+	bounds := geom.aabb_expand(ir.brush_bounds(b), 1)
+	for &face, index in b.faces {
+		winding := face.winding
+		if len(winding) < 3 {
+			winding = geom.brush_face_winding(planes[:], index, bounds)
+			if len(winding) >= 3 {
+				diag.info(dg, "t3d.winding-derived", "polygon vertices were derived from the brush planes", name)
 			}
 		}
+		if len(winding) < 3 {
+			diag.warn(
+				dg,
+				"t3d.brush-dropped",
+				"brush dropped: one of its faces has no usable polygon after evaluation",
+				name,
+			)
+			return prepared, false
+		}
+		prepared.windings[index] = winding[:]
 	}
-	write_actor_props(w, 2, e)
+	return prepared, true
+}
+
+write_actor :: proc(w: ^Writer, e: ^ir.Entity, d: ^ir.Document, dg: ^diag.Diagnostics) {
+	name := actor_name_for(w, e.class_name, e.id)
+
+	// Prepare the brushes first: an actor whose brushes cannot be written must not
+	// leave an empty "Begin Actor" in the output.
+	usable := make([][2]int, len(e.brushes))
+	usable_count := 0
+	defer delete(usable)
 	for brush_index in e.brushes {
 		if brush_index < 0 || brush_index >= len(d.brushes) {
 			diag.warn(dg, "t3d.dangling-brush", "entity references a brush that does not exist", name)
 			continue
 		}
 		brush_name := brush_name_for_entity(w, &d.brushes[brush_index], name)
-		write_brush_block(w, 2, &d.brushes[brush_index], brush_name, dg)
+		if _, ok := prepare_brush(&d.brushes[brush_index], dg, brush_name); ok {
+			if usable_count < len(usable) {
+				usable[usable_count] = [2]int{brush_index, 0}
+				usable_count += 1
+			}
+		}
+	}
+	usable = usable[:usable_count]
+	if len(e.brushes) > 0 && usable_count == 0 {
+		diag.warn(dg, "t3d.actor-dropped", "actor dropped: none of its brushes could be written", name)
+		return
+	}
+
+	write_line(w, 1, ir.concat("Begin Actor Class=", e.class_name, " Name=", name))
+	// A brush actor needs its CSG operation on the actor, not on the UModel.
+	if len(usable) > 0 {
+		first := usable[0][0]
+		write_line(w, 2, ir.concat("CsgOper=", csg_op_text(d.brushes[first].op)))
+		for slot in usable[1:] {
+			if d.brushes[slot[0]].op != d.brushes[first].op {
+				diag.warn(
+					dg,
+					"t3d.mixed-csg-operations",
+					"an actor owns brushes with different CSG operations; Unreal stores only one",
+					name,
+				)
+				break
+			}
+		}
+	}
+	write_actor_props(w, 2, e)
+	for slot in usable {
+		brush_index := slot[0]
+		brush_name := brush_name_for_entity(w, &d.brushes[brush_index], name)
+		prepared_brush, _ := prepare_brush(&d.brushes[brush_index], dg, brush_name)
+		write_brush_block(w, 2, &d.brushes[brush_index], &prepared_brush, brush_name, dg)
 	}
 	write_line(w, 1, "End Actor")
 }
@@ -138,9 +195,14 @@ write_brush_actor :: proc(w: ^Writer, b: ^ir.Brush, name: string, dg: ^diag.Diag
 	if b.id == "" {
 		brush_name = ir.concat("Model_", actor_name[strings.last_index_byte(actor_name, '_') + 1:])
 	}
+	prepared, ok := prepare_brush(b, dg, brush_name)
+	if !ok {
+		diag.warn(dg, "t3d.actor-dropped", "brush actor dropped: its only brush could not be written", actor_name)
+		return
+	}
 	write_line(w, 1, ir.concat("Begin Actor Class=Brush Name=", actor_name))
 	write_line(w, 2, ir.concat("CsgOper=", csg_op_text(b.op)))
-	write_brush_block(w, 2, b, brush_name, dg)
+	write_brush_block(w, 2, b, &prepared, brush_name, dg)
 	write_line(w, 1, "End Actor")
 }
 
@@ -169,7 +231,14 @@ brush_name_for_entity :: proc(w: ^Writer, b: ^ir.Brush, actor_name: string) -> s
 	return ir.concat(actor_name, "_Model")
 }
 
-write_brush_block :: proc(w: ^Writer, indent: int, b: ^ir.Brush, brush_name: string, dg: ^diag.Diagnostics) {
+write_brush_block :: proc(
+	w: ^Writer,
+	indent: int,
+	b: ^ir.Brush,
+	prepared: ^Prepared_Brush,
+	brush_name: string,
+	dg: ^diag.Diagnostics,
+) {
 	write_line(w, indent, ir.concat("Begin Brush Name=", brush_name))
 	for p in b.props {
 		// Internal bookkeeping keys are not part of the T3D representation.
@@ -181,31 +250,9 @@ write_brush_block :: proc(w: ^Writer, indent: int, b: ^ir.Brush, brush_name: str
 	if len(b.faces) == 0 {
 		diag.warn(dg, "t3d.brush-without-faces", "brush has no faces", brush_name)
 	}
-
-	// Face windings are evaluated once per brush: T3D polygons need explicit
-	// vertices, while VMF only carries planes.
-	planes := ir.brush_planes(b)
-	defer delete(planes)
-	bounds := ir.brush_bounds(b)
-	bounds = geom.aabb_expand(bounds, 1)
-
 	write_line(w, indent + 1, "Begin PolyList")
 	for &face, index in b.faces {
-		winding := face.winding
-		if len(winding) < 3 {
-			winding = geom.brush_face_winding(planes[:], index, bounds)
-			if len(winding) < 3 {
-				diag.err(dg, "t3d.face-without-winding", "face collapses when its brush is evaluated; polygon skipped", brush_name)
-				continue
-			}
-			diag.info(dg, "t3d.winding-derived", "polygon vertices were derived from the brush planes", brush_name)
-		}
-		write_polygon(w, indent + 2, &face, winding[:])
-		for key in face.props {
-			if strings.has_prefix(key.key, "vmf.") {
-				w.skipped_foreign += 1
-			}
-		}
+		write_polygon(w, indent + 2, &face, prepared.windings[index])
 	}
 	write_line(w, indent + 1, "End PolyList")
 	write_line(w, indent, "End Brush")

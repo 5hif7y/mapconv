@@ -8,6 +8,7 @@ import "core:fmt"
 import "core:math"
 import "core:sort"
 import "core:strings"
+import "../bsp"
 import "../diag"
 import "../geom"
 import "../ir"
@@ -47,6 +48,8 @@ format_from_extension :: proc(path: string) -> ir.Format {
 	switch {
 	case strings.has_suffix(lower, ".vmf"):
 		return .Source_VMF
+	case strings.has_suffix(lower, ".bsp"):
+		return .Source_BSP
 	case strings.has_suffix(lower, ".t3d"):
 		return .Unreal_T3D
 	case strings.has_suffix(lower, ".map"):
@@ -64,6 +67,13 @@ detect_format :: proc(path: string, contents: string) -> (format: ir.Format, by_
 		head = head[:4096]
 	}
 	if by_extension != .Unknown {
+		// A .bsp may still be a Quake or GoldSrc file; the signature decides.
+		if by_extension == .Source_BSP {
+			if len(contents) >= 4 && contents[:4] == "VBSP" {
+				return .Source_BSP, false
+			}
+			return .Unknown, false
+		}
 		return by_extension, false
 	}
 	lower := strings.to_lower(head)
@@ -77,13 +87,68 @@ detect_format :: proc(path: string, contents: string) -> (format: ir.Format, by_
 	return .Unknown, false
 }
 
-SUPPORTED_FORMATS :: []ir.Format{ir.Format.Source_VMF, ir.Format.Unreal_T3D}
+SUPPORTED_FORMATS :: []ir.Format{ir.Format.Source_VMF, ir.Format.Source_BSP, ir.Format.Unreal_T3D}
 
 is_supported :: proc(f: ir.Format) -> bool {
+	return f == .Source_VMF || f == .Source_BSP || f == .Unreal_T3D
+}
+
+// Compiled formats are import-only: mapconv does not contain a BSP compiler.
+is_target_supported :: proc(f: ir.Format) -> bool {
 	return f == .Source_VMF || f == .Unreal_T3D
 }
 
+// Engine groups formats that share an authoring model, so their entity classes and
+// properties cross over without mapping.
+Engine :: enum {
+	Unknown,
+	Source,
+	Unreal,
+}
+
+engine_of :: proc(f: ir.Format) -> Engine {
+	switch f {
+	case .Source_VMF, .Source_BSP, .Goldsrc_MAP, .Valve_220:
+		return .Source
+	case .Unreal_T3D:
+		return .Unreal
+	case .Unknown:
+		return .Unknown
+	}
+	return .Unknown
+}
+
+// import_only runs the importer for a single format without any target, used by
+// `inspect` and `validate` (which must also work for import-only formats).
+import_only :: proc(data: []u8, source_path: string, opts: Options) -> (ir.Document, diag.Diagnostics) {
+	contents := string(data)
+	format := opts.from
+	d := diag.init()
+	if format == .Unknown {
+		detected, _ := detect_format(source_path, contents)
+		format = detected
+	}
+	#partial switch format {
+	case .Source_VMF:
+		return vmf.import_document(contents, source_path)
+	case .Source_BSP:
+		return bsp.import_document(data, source_path)
+	case .Unreal_T3D:
+		return t3d.import_document(contents, source_path)
+	case:
+		diag.err(&d, "convert.unsupported-source", ir.concat("no importer for format ", ir.format_name(format)), source_path)
+		doc := ir.init_document(.Unknown, xform.source_1())
+		return doc, d
+	}
+}
+
 convert_text :: proc(contents, source_path: string, opts: Options) -> Result {
+	return convert_bytes(transmute([]u8)contents, source_path, opts)
+}
+
+// convert_bytes is the entry point for binary formats too (BSP).
+convert_bytes :: proc(data: []u8, source_path: string, opts: Options) -> Result {
+	contents := string(data)
 	res: Result
 	res.diagnostics = diag.init()
 	res.source_format = opts.from
@@ -109,7 +174,7 @@ convert_text :: proc(contents, source_path: string, opts: Options) -> Result {
 		)
 		return res
 	}
-	if !is_supported(res.target_format) {
+	if !is_target_supported(res.target_format) {
 		diag.err(
 			&res.diagnostics,
 			"convert.unsupported-target",
@@ -123,6 +188,8 @@ convert_text :: proc(contents, source_path: string, opts: Options) -> Result {
 	#partial switch res.source_format {
 	case .Source_VMF:
 		res.doc, res.diagnostics = vmf.import_document(contents, source_path)
+	case .Source_BSP:
+		res.doc, res.diagnostics = bsp.import_document(data, source_path)
 	case .Unreal_T3D:
 		res.doc, res.diagnostics = t3d.import_document(contents, source_path)
 	case:
@@ -133,7 +200,7 @@ convert_text :: proc(contents, source_path: string, opts: Options) -> Result {
 	}
 
 	// 2. Coordinate and unit transformation, only when the frames differ.
-	if res.source_format != res.target_format {
+	if engine_of(res.source_format) != engine_of(res.target_format) {
 		target_cs := res.target_format == .Source_VMF ? xform.source_1() : xform.unreal_3()
 		transform, ok := xform.transform_between(res.doc.cs, target_cs)
 		if !ok {
@@ -154,14 +221,14 @@ convert_text :: proc(contents, source_path: string, opts: Options) -> Result {
 	if !found {
 		diag.warn(&res.diagnostics, "convert.unknown-profile", ir.concat("unknown profile '", opts.profile_name, "'; no entity mapping applied"), source_path)
 	}
-	if res.source_format != res.target_format {
+	if engine_of(res.source_format) != engine_of(res.target_format) {
 		map_entities(&res.doc, prof, &res.diagnostics)
 		map_entity_properties(&res.doc, prof, res.target_format, &res.diagnostics)
 	}
 
 	// 4. Validation of what is about to be written.
 	validate_document(&res.doc, &res.diagnostics)
-	if res.source_format != res.target_format {
+	if engine_of(res.source_format) != engine_of(res.target_format) {
 		report_surface_loss(&res.doc, res.target_format, &res.diagnostics)
 	}
 
@@ -221,10 +288,12 @@ apply_transform :: proc(doc: ^ir.Document, t: xform.Transform, target: xform.Coo
 			} else {
 				diag.warn(dg, "convert.degenerate-texture-axis", "texture projection becomes degenerate under the transform", brush.id)
 			}
-			if face.winding_source == .Authored && len(face.winding) >= 3 {
+			// Windings are affine, so clipping in one frame and transforming the
+			// result is equivalent to clipping in the target frame. Transforming
+			// keeps the evaluated geometry available and avoids re-deriving it from
+			// planes with an estimated bound.
+			if len(face.winding) >= 3 {
 				face.winding = xform.apply_winding(t, face.winding[:])
-			} else {
-				clear(&face.winding)
 			}
 		}
 	}

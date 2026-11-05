@@ -6,7 +6,7 @@ ODIN ?= odin
 BIN  := mapconv.exe
 
 # Packages in dependency order; those without *_test.odin are skipped.
-PACKAGES := geom xform ir diag profile vmf t3d convert
+PACKAGES := geom xform ir diag profile kv vmf bsp t3d convert
 
 .PHONY: all build test test-verbose clean fmt
 

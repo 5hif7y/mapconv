@@ -17,7 +17,9 @@ import "core:strings"
 
 Format :: enum {
 	Unknown,
+	// Source 1 editable text and compiled binary.
 	Source_VMF,
+	Source_BSP,
 	Unreal_T3D,
 	Goldsrc_MAP,
 	Valve_220,
@@ -29,6 +31,8 @@ format_name :: proc(f: Format) -> string {
 		return "unknown"
 	case .Source_VMF:
 		return "source1-vmf"
+	case .Source_BSP:
+		return "source1-bsp"
 	case .Unreal_T3D:
 		return "unreal3-t3d"
 	case .Goldsrc_MAP:
@@ -311,26 +315,33 @@ brush_bounds :: proc(b: ^Brush, fallback_radius: f64 = 64) -> geom.Aabb {
 		// estimate independent from the face order.
 		planes := brush_planes(b)
 		defer delete(planes)
-		for i in 0 ..< len(planes) {
-			for j in i + 1 ..< len(planes) {
-				for k in j + 1 ..< len(planes) {
-					if p, ok := plane_intersection(planes[i], planes[j], planes[k]); ok {
-						inside := true
-						for pl in planes {
-							if geom.plane_distance(pl, p) > 1 {
-								inside = false
-								break
+		max_dist := 0.0
+		for pl in planes {
+			max_dist = max(max_dist, abs(pl.dist))
+			for i in 0 ..< len(planes) {
+				for j in i + 1 ..< len(planes) {
+					for k in j + 1 ..< len(planes) {
+						if p, ok := plane_intersection(planes[i], planes[j], planes[k]); ok {
+							inside := true
+							for other in planes {
+								if geom.plane_distance(other, p) > 1 {
+									inside = false
+									break
+								}
 							}
-						}
-						if inside {
-							append(&points, p)
+							if inside {
+								append(&points, p)
+							}
 						}
 					}
 				}
 			}
 		}
 		if len(points) == 0 {
-			return {{-fallback_radius, -fallback_radius, -fallback_radius}, {fallback_radius, fallback_radius, fallback_radius}}
+			// A bound that certainly contains the brush: every plane is at most
+			// `max_dist` from the origin along its normal.
+			radius := max(max_dist * 4 + 64, fallback_radius)
+			return {{-radius, -radius, -radius}, {radius, radius, radius}}
 		}
 	}
 	return geom.aabb_from_points(points[:])
