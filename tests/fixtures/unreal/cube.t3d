@@ -69,8 +69,9 @@ Begin Map Name=mapconv_cube
       End Actor
       Begin Actor Class=PointLight Name=PointLight_0
          Location=(X=0,Y=0,Z=192)
-         Rotation=(Pitch=0,Yaw=90,Roll=0)
-         Brightness=200
+         Rotation=(Pitch=0,Yaw=16384,Roll=0)
+         LightColor=(R=255,G=200,B=150,A=255)
+         Brightness=1.0
       End Actor
    End Level
    Begin Surface

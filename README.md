@@ -83,11 +83,14 @@ Bidirectional does not mean lossless. Current, documented behaviour:
 | Situation | Behaviour |
 | --- | --- |
 | Source units -> Unreal units | exact `1 in = 2.54 cm` scaling plus a Y mirror; reported as `convert.transform` |
-| Entity classes | mapped only through a profile; unmapped classes are kept and warned about |
-| Entity rotation | yaw/roll sign follows the handedness change; the rest is reported as approximated |
+| Entity classes | mapped through a profile; unmapped classes are kept and warned about |
+| Entity properties | converted by rule tables (light colour/brightness, rotation, names); anything without a rule is reported and dropped |
+| Entity rotation | derived from both engines' rotation matrices (pitch/yaw negated, roll preserved), reported as `convert.rotation-mapped` |
 | Source VMF faces | have no vertices; T3D export derives polygon vertices by clipping the brush planes |
 | Unreal subtractive brushes | VMF cannot express them; export warns and writes additive geometry |
 | Materials | kept by name; no asset or material graph is converted |
+| Lightmap scale, smoothing groups (VMF) | no T3D field; reported as dropped (`convert.surface-settings-dropped`) |
+| Surface flags (T3D) | no VMF field; reported as dropped (`convert.surface-flags-dropped`) |
 | Displacements, overlays, instances | detected and preserved opaquely or reported; never silently dropped |
 | T3D nested objects, foliage, MapPackage | reported; not converted |
 | Unknown properties | preserved verbatim with their original text |
@@ -101,6 +104,7 @@ B.t3d  -> t3d importer -> canonical IR -> xform + profile -> vmf exporter -> B.v
 
 See `docs/architecture.md` for the package boundaries and invariants,
 `docs/ir.md` for the data model, `docs/coordinates.md` for the frames and units,
+`docs/entity-mapping.md` for what happens to classes and properties,
 `docs/diagnostics.md` for the diagnostic contract and `docs/formats/` for the
 per-format scope. `docs/testing.md` lists what the tests cover and the provenance
 of the fixtures.
@@ -116,6 +120,8 @@ Implemented:
 - [x] VMF and T3D parsing and serialization with unknown-data preservation.
 - [x] Brush, plane, winding and texture-projection conversion.
 - [x] Initial entity mapping through profiles.
+- [x] Typed entity property conversion for Source <-> Unreal: light colour and
+      brightness, rotation (derived from both engines' matrices), names.
 - [x] Bidirectional fixtures, validation and conversion reports.
 
 Next, in rough order:
@@ -123,7 +129,8 @@ Next, in rough order:
 - [ ] Unreal CSG evaluation/reconstruction for subtractive brushes when targeting
       brush-based formats.
 - [ ] GoldSrc `.map` / Valve 220 adapter.
-- [ ] Entity property mapping (typed value conversion, not just class renames).
+- [ ] Class-scoped property rules and game-specific entity tables.
+- [ ] Entity I/O (Source `target`/`outputs`, Unreal `Event`/`Tag` graphs).
 - [ ] Material profile tables and resource reference resolution.
 - [ ] CLI end-to-end tests and machine-readable (JSON) diagnostics.
 - [ ] Review whether the mature IR should become a versioned interchange format.

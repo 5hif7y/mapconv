@@ -93,12 +93,21 @@ entity id, `world.solid[3].side[2]`) and a source location for parsed text.
 | `convert.transform` | the frame/unit transform that was applied |
 | `convert.degenerate-plane` | a plane collapses under the transform |
 | `convert.degenerate-texture-axis` | a texture projection collapses under the transform |
-| `convert.rotation-approximated` | entity angles were mirrored, semantics not adapted |
 | `convert.unknown-profile` | requested profile does not exist; no mapping applied |
-| `convert.unmapped-class` | no profile entry for an entity class |
+| `convert.unmapped-class` | no profile entry for an entity class; the class name is kept |
 | `convert.class-mapped` | class renamed by the profile (with the profile's note) |
 | `convert.class-without-actor` | class has no target equivalent and no geometry |
 | `convert.entity-collapsed` | geometry-only actor; its brushes moved to the world |
+| `convert.property-mapped` | property converted to the target key |
+| `convert.property-dropped` | property intentionally dropped (with the reason) |
+| `convert.property-unmapped` | no rule for a property; it was dropped |
+| `convert.rotation-mapped` | angles/rotator converted, with both representations |
+| `convert.angles-invalid` | `angles` could not be parsed |
+| `convert.light-mapped`, `convert.light-brightness-scaled` | light colour/brightness mapped, with the scale that was applied |
+| `convert.light-value-invalid`, `convert.light-color-invalid`, `convert.light-brightness-invalid` | light property could not be parsed |
+| `convert.asset-reference` | asset reference preserved as text only; no asset converted |
+| `convert.surface-settings-dropped` | lightmap scale / smoothing groups had no target field |
+| `convert.surface-flags-dropped` | surface flags had no target field |
 | `convert.material-preserved` | material kept by name, no asset converted |
 | `convert.summary` | object counts of the finished conversion |
 

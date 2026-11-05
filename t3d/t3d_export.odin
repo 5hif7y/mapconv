@@ -101,11 +101,25 @@ export_document :: proc(d: ^ir.Document, dg: ^diag.Diagnostics, opts := DEFAULT_
 }
 
 write_actor :: proc(w: ^Writer, e: ^ir.Entity, d: ^ir.Document, dg: ^diag.Diagnostics) {
-	name := e.id
-	if name == "" || is_numeric(name) {
-		name = write_name(w, 0, e.class_name)
-	}
+	name := actor_name_for(w, e.class_name, e.id)
 	write_line(w, 1, ir.concat("Begin Actor Class=", e.class_name, " Name=", name))
+	// A brush actor needs its CSG operation on the actor, not on the UModel.
+	if len(e.brushes) > 0 {
+		if first := e.brushes[0]; first >= 0 && first < len(d.brushes) {
+			write_line(w, 2, ir.concat("CsgOper=", csg_op_text(d.brushes[first].op)))
+			for other in e.brushes[1:] {
+				if other >= 0 && other < len(d.brushes) && d.brushes[other].op != d.brushes[first].op {
+					diag.warn(
+						dg,
+						"t3d.mixed-csg-operations",
+						"an actor owns brushes with different CSG operations; Unreal stores only one",
+						name,
+					)
+					break
+				}
+			}
+		}
+	}
 	write_actor_props(w, 2, e)
 	for brush_index in e.brushes {
 		if brush_index < 0 || brush_index >= len(d.brushes) {
@@ -119,12 +133,10 @@ write_actor :: proc(w: ^Writer, e: ^ir.Entity, d: ^ir.Document, dg: ^diag.Diagno
 }
 
 write_brush_actor :: proc(w: ^Writer, b: ^ir.Brush, name: string, dg: ^diag.Diagnostics) {
-	actor_name := b.id
-	brush_name := b.id
-	if actor_name == "" || is_numeric(actor_name) {
-		w.next += 1
-		actor_name = fmt.aprintf("%s_%d", name, w.next)
-		brush_name = fmt.aprintf("Model_%d", w.next)
+	actor_name := actor_name_for(w, name, b.id)
+	brush_name := brush_name_for_entity(w, b, actor_name)
+	if b.id == "" {
+		brush_name = ir.concat("Model_", actor_name[strings.last_index_byte(actor_name, '_') + 1:])
 	}
 	write_line(w, 1, ir.concat("Begin Actor Class=Brush Name=", actor_name))
 	write_line(w, 2, ir.concat("CsgOper=", csg_op_text(b.op)))
@@ -132,11 +144,27 @@ write_brush_actor :: proc(w: ^Writer, b: ^ir.Brush, name: string, dg: ^diag.Diag
 	write_line(w, 1, "End Actor")
 }
 
+// actor_name_for keeps an authored name, pairs a numeric id with its class
+// ("Brush_7") and only falls back to a counter when there is no id at all.
+actor_name_for :: proc(w: ^Writer, class_name, id: string) -> string {
+	if id == "" {
+		return write_name(w, 0, class_name)
+	}
+	if is_numeric(id) {
+		return ir.concat(class_name, "_", id)
+	}
+	return id
+}
+
 // brush_name_for_entity names the UModel of an entity-owned brush after the
 // actor so a round trip keeps the actor/brush pairing readable.
 brush_name_for_entity :: proc(w: ^Writer, b: ^ir.Brush, actor_name: string) -> string {
 	if b.id != "" && !is_numeric(b.id) {
 		return b.id
+	}
+	// "Brush_7" pairs with "Model_7", matching the engine's own naming.
+	if cut := strings.last_index_byte(actor_name, '_'); cut >= 0 {
+		return ir.concat("Model_", actor_name[cut + 1:])
 	}
 	return ir.concat(actor_name, "_Model")
 }

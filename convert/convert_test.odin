@@ -185,3 +185,147 @@ test_validate_flags_missing_material :: proc(t: ^testing.T) {
 	}
 	testing.expect(t, found)
 }
+
+@(test)
+test_source_light_maps_to_unreal_light_component :: proc(t: ^testing.T) {
+	src := read_fixture(t, VMF_FIXTURE)
+	result := convert_text(src, "cube.vmf", Options{to = .Unreal_T3D, profile_name = "source1-to-unreal3"})
+	testing.expect(t, result.ok)
+
+	light: ^ir.Entity
+	for &entity in result.doc.entities {
+		if entity.class_name == "PointLight" {
+			light = &entity
+		}
+	}
+	testing.expect(t, light != nil, "the Source light must map to a PointLight")
+	color, has_color := ir.property_string(light.props[:], "LightColor")
+	testing.expect(t, has_color)
+	testing.expect_value(t, color, "(R=255,G=255,B=255,A=255)")
+	brightness, has_brightness := ir.property_f64(light.props[:], "Brightness")
+	testing.expect(t, has_brightness)
+	testing.expect_value(t, brightness, f64(1))
+	testing.expect(t, strings.contains(result.output, "LightColor=(R=255,G=255,B=255,A=255)"))
+	testing.expect(t, strings.contains(result.output, "Brightness=1"))
+	testing.expect(t, !strings.contains(result.output, "_light"), "the Source key must not leak into T3D")
+}
+
+@(test)
+test_unreal_light_maps_back_to_source :: proc(t: ^testing.T) {
+	src := read_fixture(t, T3D_FIXTURE)
+	result := convert_text(src, "cube.t3d", Options{to = .Source_VMF, profile_name = "unreal3-to-source1"})
+	testing.expect(t, result.ok)
+	light: ^ir.Entity
+	for &entity in result.doc.entities {
+		if entity.class_name == "light" {
+			light = &entity
+		}
+	}
+	testing.expect(t, light != nil)
+	value, has_value := ir.property_string(light.props[:], "_light")
+	testing.expect(t, has_value)
+	testing.expect_value(t, value, "255 200 150 200")
+	testing.expect(t, !strings.contains(result.output, "Brightness="), "Unreal keys must not leak into VMF")
+}
+
+@(test)
+test_rotation_maps_both_directions :: proc(t: ^testing.T) {
+	// Source angles (pitch yaw roll) -> Unreal rotator (65536 units per turn).
+	source := read_fixture(t, VMF_FIXTURE)
+	to_unreal := convert_text(source, "cube.vmf", Options{to = .Unreal_T3D, profile_name = "source1-to-unreal3"})
+	start: ^ir.Entity
+	for &entity in to_unreal.doc.entities {
+		if entity.class_name == "PlayerStart" {
+			start = &entity
+		}
+	}
+	testing.expect(t, start != nil)
+	testing.expect(t, start.has_rotation)
+	testing.expect_value(t, start.rotation.pitch, i32(0))
+	testing.expect_value(t, start.rotation.yaw, i32(-16384)) // 90 degrees, mirrored
+	testing.expect_value(t, start.rotation.roll, i32(0))
+	testing.expect(t, start.angles == geom.VEC3_ZERO)
+
+	// And back: Unreal yaw 16384 -> Source yaw -90.
+	unreal := read_fixture(t, T3D_FIXTURE)
+	to_source := convert_text(unreal, "cube.t3d", Options{to = .Source_VMF, profile_name = "unreal3-to-source1"})
+	for entity in to_source.doc.entities {
+		if entity.class_name == "light" {
+			testing.expect(t, !entity.has_rotation)
+			testing.expect(t, math.abs(entity.angles.y + 90) < 1e-6, "Unreal yaw 90 degrees must become Source yaw -90")
+		}
+	}
+}
+
+@(test)
+test_unmapped_property_is_reported_and_dropped :: proc(t: ^testing.T) {
+	src := `versioninfo
+{
+	"formatversion" "100"
+}
+world
+{
+	"id" "1"
+	"classname" "worldspawn"
+}
+entity
+{
+	"id" "10"
+	"classname" "light"
+	"origin" "0 0 64"
+	"_light" "255 255 255 200"
+	"_custom_thing" "42"
+}
+`
+	result := convert_text(src, "custom.vmf", Options{to = .Unreal_T3D, profile_name = "source1-to-unreal3"})
+	testing.expect(t, result.ok)
+	found := false
+	for item in result.diagnostics.items {
+		if item.code == "convert.property-unmapped" && strings.contains(item.message, "_custom_thing") {
+			found = true
+		}
+	}
+	testing.expect(t, found, "unmapped properties must be reported")
+	testing.expect(t, !strings.contains(result.output, "_custom_thing"))
+}
+
+@(test)
+test_surface_flags_are_reported_when_targeting_vmf :: proc(t: ^testing.T) {
+	src := read_fixture(t, T3D_FIXTURE)
+	result := convert_text(src, "cube.t3d", Options{to = .Source_VMF, profile_name = "unreal3-to-source1"})
+	found := false
+	for item in result.diagnostics.items {
+		if item.code == "convert.surface-flags-dropped" {
+			found = true
+		}
+	}
+	testing.expect(t, found, "T3D surface flags have no VMF field and must be reported")
+}
+
+@(test)
+test_targetname_maps_to_tag :: proc(t: ^testing.T) {
+	src := `versioninfo
+{
+	"formatversion" "100"
+}
+world
+{
+	"id" "1"
+	"classname" "worldspawn"
+}
+entity
+{
+	"id" "10"
+	"classname" "logic_relay"
+	"targetname" "relay_one"
+}
+`
+	result := convert_text(src, "relay.vmf", Options{to = .Unreal_T3D, profile_name = "source1-to-unreal3"})
+	for entity in result.doc.entities {
+		if value, ok := ir.property_string(entity.props[:], "Tag"); ok {
+			testing.expect_value(t, value, "relay_one")
+			return
+		}
+	}
+	testing.expect(t, false, "targetname should become Tag")
+}

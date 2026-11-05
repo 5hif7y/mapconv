@@ -36,17 +36,17 @@ p_target = linear * p_source * scale,   linear = to.to_canonical^-1 * from.to_ca
 Source -> Unreal therefore scales by `2.54` (1 inch = 2.54 cm) and mirrors Y.
 Unreal -> Source scales by `0.3937...` and mirrors Y again.
 
-`mirrored` is `det(linear) < 0`. It drives three behaviours:
+`mirrored` is `det(linear) < 0`. It drives two behaviours:
 
 1. **Planes.** `apply_plane` transforms three points of the plane and swaps two of
    them when the transform mirrors, so the outward normal keeps pointing at the
    same side of the surface.
 2. **Windings.** `apply_winding` transforms the vertices and reverses their order
    when mirrored, so a polygon stays counter-clockwise around its own normal.
-3. **Entity angles.** Unreal and Source describe rotation differently. Only the
-   yaw/roll sign follows the handedness change deterministically; the conversion
-   reports `convert.rotation-approximated` so no one assumes the orientation is
-   exact.
+
+Rotation is not a coordinate-system concern: entity angles and Unreal rotators are
+engine semantics, so they are converted by the entity mapping stage
+(`docs/entity-mapping.md`), never by an implicit sign flip here.
 
 ## Texture projections
 

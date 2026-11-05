@@ -25,9 +25,10 @@ failures.
 | --- | --- |
 | Plane and winding math | `geom/geom_test.odin` — plane from map points, plane/point round trip, degenerate input, cube face clipping, winding orientation, half-space clipping, matrix inverse, numeric formatting |
 | Coordinate systems | `xform/xform_test.odin` — inch/centimetre scale, Y mirror, round-trip identity, outward normals under mirroring, winding orientation, texture-projection invariance |
+| Rotation | `xform/xform_test.odin` — known Source/Unreal rotator values, degree/unit round trip, and a check that both engines' rotation matrices agree after the Y mirror |
 | VMF | `vmf/vmf_test.odin` — tokenizer escapes/comments, plane parsing, texture axes, fixture import (6 faces, materials, entities), unknown-key namespacing, export/import round trip, malformed input, subtractive-CSG warning |
 | T3D | `t3d/t3d_test.odin` — tokenizer quoting, vector/rotation parsing, nesting, fixture import (6 polygons, flags, rotation), export/import round trip, malformed blocks, missing map, polygon-list fragment |
-| Conversion | `convert/convert_test.odin` — format detection, VMF→T3D (units, mapping, transform note), T3D→VMF (brush actors collapse into the world), geometry round trip, subtractive CSG warning, unmapped class warning, unsupported target, validation |
+| Conversion | `convert/convert_test.odin` — format detection, VMF→T3D (units, mapping, transform note), T3D→VMF (brush actors collapse into the world), geometry round trip, subtractive CSG warning, unmapped class/property reporting, light colour and brightness in both directions, rotation in both directions, `targetname`↔`Tag`, unsupported target, validation |
 
 ## Fixtures
 

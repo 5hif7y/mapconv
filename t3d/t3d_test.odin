@@ -5,7 +5,9 @@ import "core:os"
 import "core:testing"
 import "../diag"
 import "../geom"
+import "core:strings"
 import "../ir"
+import "../xform"
 
 FIXTURE :: "tests/fixtures/unreal/cube.t3d"
 
@@ -99,10 +101,13 @@ test_import_fixture :: proc(t: ^testing.T) {
 	testing.expect_value(t, light.class_name, "PointLight")
 	testing.expect_value(t, light.origin, geom.vec3(0, 0, 192))
 	testing.expect(t, light.has_rotation)
-	testing.expect_value(t, light.rotation.yaw, i32(90))
+	testing.expect_value(t, light.rotation.yaw, i32(16384))
 	brightness, has_brightness := ir.property_f64(light.props[:], "brightness")
 	testing.expect(t, has_brightness)
-	testing.expect_value(t, brightness, f64(200))
+	testing.expect_value(t, brightness, f64(1))
+	color, has_color := ir.property_string(light.props[:], "lightcolor")
+	testing.expect(t, has_color)
+	testing.expect_value(t, color, "(R=255,G=200,B=150,A=255)")
 }
 
 @(test)
@@ -148,6 +153,28 @@ End Map
 test_missing_map_is_an_error :: proc(t: ^testing.T) {
 	_, diagnostics := import_document("Begin Level NAME=Level\nEnd Level\n", "nomap.t3d")
 	testing.expect(t, diag.has_errors(&diagnostics))
+}
+
+@(test)
+test_brush_entity_exports_csg_operation_and_tag :: proc(t: ^testing.T) {
+	doc := ir.init_document(.Unreal_T3D, xform.unreal_3())
+	brush := ir.make_brush("", .Subtract)
+	// A tetrahedron is enough to give the brush four faces.
+	append(&brush.faces, ir.make_face({geom.vec3(0, 0, 1), 64}, ir.default_tex_projection(), "Mat"))
+	append(&brush.faces, ir.make_face({geom.vec3(1, 0, 0), 64}, ir.default_tex_projection(), "Mat"))
+	append(&brush.faces, ir.make_face({geom.vec3(-1, 0, 0), 64}, ir.default_tex_projection(), "Mat"))
+	append(&brush.faces, ir.make_face({geom.vec3(0, 0, -1), 64}, ir.default_tex_projection(), "Mat"))
+	entity := ir.make_entity("7", "Brush")
+	ir.push_property(&entity.props, "Tag", "door", "door")
+	append(&entity.brushes, ir.add_brush(&doc, brush))
+	append(&doc.entities, entity)
+
+	diagnostics := diag.init()
+	text := export_document(&doc, &diagnostics)
+	testing.expect(t, strings.contains(text, "CsgOper=CSG_Subtract"))
+	testing.expect(t, strings.contains(text, "Tag=door"))
+	testing.expect(t, strings.contains(text, "Begin Brush Name=Model_7"))
+	testing.expect(t, !strings.contains(text, "Begin Actor Class=Brush Name=7"), "numeric ids must not become actor names")
 }
 
 @(test)

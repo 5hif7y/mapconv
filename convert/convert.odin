@@ -156,10 +156,14 @@ convert_text :: proc(contents, source_path: string, opts: Options) -> Result {
 	}
 	if res.source_format != res.target_format {
 		map_entities(&res.doc, prof, &res.diagnostics)
+		map_entity_properties(&res.doc, prof, res.target_format, &res.diagnostics)
 	}
 
 	// 4. Validation of what is about to be written.
 	validate_document(&res.doc, &res.diagnostics)
+	if res.source_format != res.target_format {
+		report_surface_loss(&res.doc, res.target_format, &res.diagnostics)
+	}
 
 	// 5. Serialize.
 	#partial switch res.target_format {
@@ -224,27 +228,14 @@ apply_transform :: proc(doc: ^ir.Document, t: xform.Transform, target: xform.Coo
 			}
 		}
 	}
-	transform_entity :: proc(e: ^ir.Entity, t: xform.Transform, dg: ^diag.Diagnostics) {
+	// Positions follow the frame change. Angles and rotators are engine semantics,
+	// so they are converted by the property mapper, not here.
+	transform_entity :: proc(e: ^ir.Entity, t: xform.Transform) {
 		e.origin = xform.apply_point(t, e.origin)
-		if e.has_rotation && t.mirrored {
-			e.rotation.yaw = -e.rotation.yaw
-			e.rotation.roll = -e.rotation.roll
-		}
-		if e.angles != geom.VEC3_ZERO && t.mirrored {
-			// Source and Unreal describe rotation with different conventions; only
-			// the yaw sign follows the handedness change deterministically.
-			e.angles = {x = e.angles.x, y = -e.angles.y, z = -e.angles.z}
-			diag.warn(
-				dg,
-				"convert.rotation-approximated",
-				"entity angles were mirrored on yaw/roll; pitch, and any game-specific rotation semantics, are not adapted",
-				e.class_name,
-			)
-		}
 	}
-	transform_entity(&doc.world, t, dg)
+	transform_entity(&doc.world, t)
 	for &entity in doc.entities {
-		transform_entity(&entity, t, dg)
+		transform_entity(&entity, t)
 	}
 	doc.cs = target
 }
@@ -255,12 +246,15 @@ map_entities :: proc(doc: ^ir.Document, prof: profile.Profile, dg: ^diag.Diagnos
 	for &entity in doc.entities {
 		target, mapped, note := profile.map_class(prof, entity.class_name)
 		if !mapped {
-			diag.warn(
-				dg,
-				"convert.unmapped-class",
-				ir.concat("no mapping for entity class '", entity.class_name, "'; the class name is preserved"),
-				entity.id,
-			)
+				diag.warn(
+					dg,
+					"convert.unmapped-class",
+					ir.concat("no mapping for entity class '", entity.class_name, "'; the class name is preserved"),
+					entity.id,
+				)
+			// An unmapped class is kept as-is: its data is still the best available
+			// representation, and the warning records the mismatch.
+			append(&kept, entity)
 			continue
 		}
 		if target == "" {
@@ -358,6 +352,49 @@ summary_note :: proc(doc: ^ir.Document, from, to: ir.Format, dg: ^diag.Diagnosti
 			" entities",
 		),
 	)
+}
+
+// report_surface_loss records face-level data the target format cannot store. The
+// adapters deliberately do not invent equivalents for these values.
+report_surface_loss :: proc(doc: ^ir.Document, target: ir.Format, dg: ^diag.Diagnostics) {
+	lightmap := 0
+	smoothing := 0
+	flags := 0
+	for brush in doc.brushes {
+		for face in brush.faces {
+			if face.lightmap_scale != 0 && face.lightmap_scale != 16 {
+				lightmap += 1
+			}
+			if face.smoothing_groups != 0 {
+				smoothing += 1
+			}
+			if face.flags != 0 {
+				flags += 1
+			}
+		}
+	}
+	#partial switch target {
+	case .Unreal_T3D:
+		if lightmap > 0 || smoothing > 0 {
+			diag.warn(
+				dg,
+				"convert.surface-settings-dropped",
+				fmt.aprintf(
+					"%d face(s) with lightmap scale and %d with smoothing groups: T3D stores neither value, so both were dropped",
+					lightmap,
+					smoothing,
+				),
+			)
+		}
+	case .Source_VMF:
+		if flags > 0 {
+			diag.warn(
+				dg,
+				"convert.surface-flags-dropped",
+				fmt.aprintf("%d face(s) with native surface flags: VMF sides have no flag field, so they were dropped", flags),
+			)
+		}
+	}
 }
 
 // int_concat formats an int with an optional prefix.
