@@ -1,0 +1,11 @@
+# Build output
+/build/
+/mapconv.exe
+/mapconv
+
+# Sourcetrail databases and scratch projects
+*.srctrldb
+*.srctrldb-shm
+*.srctrldb-wal
+*.srctrlbm
+*.srctrlprj

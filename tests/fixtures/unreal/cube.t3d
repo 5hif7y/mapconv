@@ -1,0 +1,78 @@
+Begin Map Name=mapconv_cube
+   Begin Level NAME=Level
+      Begin Actor Class=Brush Name=Brush_0
+         CsgOper=CSG_Add
+         Begin Brush Name=Model_0
+            Begin PolyList
+               Begin Polygon Item=OUTSIDE Texture=EngineMaterials.DefaultMaterial Flags=1
+                  Origin   +0000.000000,+0000.000000,+0128.000000
+                  Normal   +0000.000000,+0000.000000,+0001.000000
+                  TextureU +0000.010000,-0000.000000,+0000.000000
+                  TextureV +0000.000000,-0000.010000,+0000.000000
+                  Vertex   +0128.000000,+0128.000000,+0128.000000
+                  Vertex   +0128.000000,-0128.000000,+0128.000000
+                  Vertex   -0128.000000,-0128.000000,+0128.000000
+                  Vertex   -0128.000000,+0128.000000,+0128.000000
+               End Polygon
+               Begin Polygon Item=OUTSIDE Texture=EngineMaterials.DefaultMaterial Flags=1
+                  Origin   +0000.000000,+0000.000000,-0128.000000
+                  Normal   +0000.000000,+0000.000000,-0001.000000
+                  TextureU +0000.010000,-0000.000000,+0000.000000
+                  TextureV +0000.000000,-0000.010000,+0000.000000
+                  Vertex   -0128.000000,+0128.000000,-0128.000000
+                  Vertex   -0128.000000,-0128.000000,-0128.000000
+                  Vertex   +0128.000000,-0128.000000,-0128.000000
+                  Vertex   +0128.000000,+0128.000000,-0128.000000
+               End Polygon
+               Begin Polygon Item=OUTSIDE Texture=EngineMaterials.DefaultMaterial Flags=1
+                  Origin   +0128.000000,+0000.000000,+0000.000000
+                  Normal   +0001.000000,+0000.000000,+0000.000000
+                  TextureU -0000.000000,+0000.010000,+0000.000000
+                  TextureV +0000.000000,-0000.000000,-0000.010000
+                  Vertex   +0128.000000,+0128.000000,+0128.000000
+                  Vertex   +0128.000000,+0128.000000,-0128.000000
+                  Vertex   +0128.000000,-0128.000000,-0128.000000
+                  Vertex   +0128.000000,-0128.000000,+0128.000000
+               End Polygon
+               Begin Polygon Item=OUTSIDE Texture=EngineMaterials.DefaultMaterial Flags=1
+                  Origin   -0128.000000,+0000.000000,+0000.000000
+                  Normal   -0001.000000,+0000.000000,+0000.000000
+                  TextureU -0000.000000,+0000.010000,+0000.000000
+                  TextureV +0000.000000,-0000.000000,-0000.010000
+                  Vertex   -0128.000000,-0128.000000,+0128.000000
+                  Vertex   -0128.000000,-0128.000000,-0128.000000
+                  Vertex   -0128.000000,+0128.000000,-0128.000000
+                  Vertex   -0128.000000,+0128.000000,+0128.000000
+               End Polygon
+               Begin Polygon Item=OUTSIDE Texture=EngineMaterials.DefaultMaterial Flags=1
+                  Origin   +0000.000000,+0128.000000,+0000.000000
+                  Normal   +0000.000000,+0001.000000,+0000.000000
+                  TextureU +0000.010000,+0000.000000,+0000.000000
+                  TextureV +0000.000000,+0000.000000,-0000.010000
+                  Vertex   -0128.000000,+0128.000000,+0128.000000
+                  Vertex   -0128.000000,+0128.000000,-0128.000000
+                  Vertex   +0128.000000,+0128.000000,-0128.000000
+                  Vertex   +0128.000000,+0128.000000,+0128.000000
+               End Polygon
+               Begin Polygon Item=OUTSIDE Texture=EngineMaterials.DefaultMaterial Flags=1
+                  Origin   +0000.000000,-0128.000000,+0000.000000
+                  Normal   +0000.000000,-0001.000000,+0000.000000
+                  TextureU +0000.010000,+0000.000000,+0000.000000
+                  TextureV +0000.000000,+0000.000000,-0000.010000
+                  Vertex   +0128.000000,-0128.000000,+0128.000000
+                  Vertex   +0128.000000,-0128.000000,-0128.000000
+                  Vertex   -0128.000000,-0128.000000,-0128.000000
+                  Vertex   -0128.000000,-0128.000000,+0128.000000
+               End Polygon
+            End PolyList
+         End Brush
+      End Actor
+      Begin Actor Class=PointLight Name=PointLight_0
+         Location=(X=0,Y=0,Z=192)
+         Rotation=(Pitch=0,Yaw=90,Roll=0)
+         Brightness=200
+      End Actor
+   End Level
+   Begin Surface
+   End Surface
+End Map
