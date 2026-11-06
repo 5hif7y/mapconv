@@ -528,8 +528,8 @@ run_extract :: proc(args: Args, text: string) {
 				}
 				delete(smd_path)
 				delete(smd)
-				model_path := fmt.aprintf("models/mapconv/%s/%s.mdl", info.mesh_package, info.mesh_name)
-				qc := ue3.static_mesh_qc(model_path, fmt.aprintf("%s_L0.smd", info.mesh_name), fmt.aprintf("models/mapconv/%s/", info.mesh_package))
+				model_path := fmt.aprintf("mapconv/%s/%s.mdl", info.mesh_package, info.mesh_name)
+				qc := ue3.static_mesh_qc(model_path, fmt.aprintf("%s_L0.smd", info.mesh_name), "mapconv")
 				qc_path := fmt.aprintf("%s/%s.qc", package_dir, info.mesh_name)
 				if os.write_entire_file(qc_path, qc) == nil {
 					qc_files += 1
@@ -600,8 +600,8 @@ run_extract :: proc(args: Args, text: string) {
 		}
 		delete(smd_path)
 		delete(smd)
-		model_path := fmt.aprintf("models/mapconv/%s/%s.mdl", map_stem, name)
-		qc := ue3.static_mesh_qc(model_path, fmt.aprintf("%s_L0.smd", name), fmt.aprintf("models/mapconv/%s/", map_stem))
+		model_path := fmt.aprintf("mapconv/%s/%s.mdl", map_stem, name)
+		qc := ue3.static_mesh_qc(model_path, fmt.aprintf("%s_L0.smd", name), "mapconv")
 		qc_path := fmt.aprintf("%s/%s.qc", dir, name)
 		if os.write_entire_file(qc_path, qc) == nil {
 			qc_files += 1
