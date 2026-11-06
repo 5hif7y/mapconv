@@ -13,6 +13,8 @@ Material_Texture :: struct {
 	material_name: string,
 	texture_name:  string,
 	has_texture:   bool,
+	bump_name:     string,
+	has_bump:      bool,
 }
 
 read_material_texture :: proc(pkg: ^Package, export_index: int, allocator := context.allocator) -> (info: Material_Texture, d: diag.Diagnostics) {
@@ -44,9 +46,14 @@ read_material_texture :: proc(pkg: ^Package, export_index: int, allocator := con
 			}
 			name := package_index_name(pkg, value)
 			if name != "" && name != "None" {
-				info.texture_name = name
-				info.has_texture = true
-				break
+				if !info.has_texture {
+					info.texture_name = name
+					info.has_texture = true
+				} else if !info.has_bump && looks_like_normal(name) {
+					info.bump_name = name
+					info.has_bump = true
+					break
+				}
 			}
 		}
 		if info.has_texture {
@@ -56,10 +63,18 @@ read_material_texture :: proc(pkg: ^Package, export_index: int, allocator := con
 	return
 }
 
+looks_like_normal :: proc(name: string) -> bool {
+	lower := strings.to_lower(name)
+	return strings.has_suffix(lower, "_n") || strings.has_suffix(lower, "_normal") || strings.contains(lower, "normal")
+}
+
 material_vmt :: proc(info: Material_Texture) -> string {
 	b := strings.builder_make()
 	strings.write_string(&b, "\"VertexLitGeneric\"\n{\n")
 	fmt.sbprintf(&b, "\t\"$basetexture\" \"%s\"\n", info.texture_name)
+	if info.has_bump {
+		fmt.sbprintf(&b, "\t\"$bumpmap\" \"%s\"\n", info.bump_name)
+	}
 	strings.write_string(&b, "\t\"$model\" \"1\"\n}\n")
 	return strings.to_string(b)
 }
