@@ -159,6 +159,16 @@ encode :: proc(width, height: int, format: u32, mips: [][]u8) -> (out: []u8, ok:
 	if width <= 0 || height <= 0 || len(mips) == 0 {
 		return
 	}
+	// DXT blocks are 4x4; Source rejects mips smaller than one full block.
+	max_mips := 1
+	if format == IMAGE_FORMAT_DXT1 || format == IMAGE_FORMAT_DXT3 || format == IMAGE_FORMAT_DXT5 {
+		for (width >> uint(max_mips)) >= 4 && (height >> uint(max_mips)) >= 4 {
+			max_mips += 1
+		}
+	} else {
+		max_mips = len(mips)
+	}
+	keep := min(len(mips), max_mips)
 	buf := make([dynamic]u8, 0, 80 + 64 * 1024)
 	append(&buf, 'V', 'T', 'F', 0)
 	append_u32(&buf, 7)
@@ -172,10 +182,10 @@ encode :: proc(width, height: int, format: u32, mips: [][]u8) -> (out: []u8, ok:
 	for _ in 0..<4 { append(&buf, 0) } // padding
 	append_u32(&buf, 0x3f800000) // bump scale 1.0
 	append_u32(&buf, format)
-	append(&buf, u8(len(mips)), 0xff, 0xff, 0xff, 0xff) // mip count, low-res none
+	append(&buf, u8(keep), 0xff, 0xff, 0xff, 0xff) // mip count, low-res none
 	append(&buf, 0, 0) // low-res size
 	for len(buf) < 80 { append(&buf, 0) }
-	for i := len(mips) - 1; i >= 0; i -= 1 {
+	for i := keep - 1; i >= 0; i -= 1 {
 		append(&buf, ..mips[i])
 	}
 	return buf[:], true
