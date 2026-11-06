@@ -171,6 +171,62 @@ convert_text :: proc(contents, source_path: string, opts: Options) -> Result {
 }
 
 // convert_bytes is the entry point for binary formats too (BSP).
+// Source needs a sealed world; UE3 levels are open and mesh based. Build a
+// hollow skybox shell (six slabs) around the converted bounds: a solid box
+// would fill the playable space instead of enclosing it.
+seal_world :: proc(doc: ^ir.Document, pad: f64) {
+	lo := geom.Vec3{1e30, 1e30, 1e30}
+	hi := geom.Vec3{-1e30, -1e30, -1e30}
+	for &b in doc.brushes {
+		for &f in b.faces {
+			for v in f.winding {
+				lo.x = min(lo.x, v.x); lo.y = min(lo.y, v.y); lo.z = min(lo.z, v.z)
+				hi.x = max(hi.x, v.x); hi.y = max(hi.y, v.y); hi.z = max(hi.z, v.z)
+			}
+		}
+	}
+	for &e in doc.entities {
+		lo.x = min(lo.x, e.origin.x); lo.y = min(lo.y, e.origin.y); lo.z = min(lo.z, e.origin.z)
+		hi.x = max(hi.x, e.origin.x); hi.y = max(hi.y, e.origin.y); hi.z = max(hi.z, e.origin.z)
+	}
+	if lo.x > hi.x {
+		lo = geom.Vec3{-4096, -4096, -4096}
+		hi = geom.Vec3{4096, 4096, 4096}
+	}
+	add_box :: proc(doc: ^ir.Document, a, b: geom.Vec3) {
+		brush := ir.Brush{id = fmt.aprintf("mapconv-seal-%d", len(doc.brushes)), op = .Add}
+		brush.faces = make([dynamic]ir.Face, 0, 6)
+		uy := geom.Vec3{0, 1, 0}; uz := geom.Vec3{0, 0, 1}; ux := geom.Vec3{1, 0, 0}
+		add := proc(brush: ^ir.Brush, n: geom.Vec3, d: f64, p0, p1, p2, p3: geom.Vec3, u, v: geom.Vec3) {
+			face := ir.Face {
+				plane = geom.Plane{normal = n, dist = d},
+				material = "TOOLS/TOOLSSKYBOX",
+				uv = ir.TexProjection{u = u, v = v, u_scale = 0.25, v_scale = 0.25},
+				lightmap_scale = 16,
+			}
+			face.winding = make([dynamic]geom.Vec3, 0, 4)
+			append(&face.winding, p0, p1, p2, p3)
+			append(&brush.faces, face)
+		}
+		add(&brush, {1, 0, 0}, b.x, {b.x, a.y, a.z}, {b.x, b.y, a.z}, {b.x, b.y, b.z}, {b.x, a.y, b.z}, uy, uz)
+		add(&brush, {-1, 0, 0}, -a.x, {a.x, b.y, a.z}, {a.x, a.y, a.z}, {a.x, a.y, b.z}, {a.x, b.y, b.z}, uy, uz)
+		add(&brush, {0, 1, 0}, b.y, {b.x, b.y, a.z}, {a.x, b.y, a.z}, {a.x, b.y, b.z}, {b.x, b.y, b.z}, ux, uz)
+		add(&brush, {0, -1, 0}, -a.y, {a.x, a.y, a.z}, {b.x, a.y, a.z}, {b.x, a.y, b.z}, {a.x, a.y, b.z}, ux, uz)
+		add(&brush, {0, 0, 1}, b.z, {a.x, a.y, b.z}, {b.x, a.y, b.z}, {b.x, b.y, b.z}, {a.x, b.y, b.z}, ux, uy)
+		add(&brush, {0, 0, -1}, -a.z, {a.x, b.y, a.z}, {b.x, b.y, a.z}, {b.x, a.y, a.z}, {a.x, a.y, a.z}, ux, uy)
+		append(&doc.brushes, brush)
+		append(&doc.world.brushes, len(doc.brushes) - 1)
+	}
+	o_lo := geom.Vec3{lo.x - pad, lo.y - pad, lo.z - pad}
+	o_hi := geom.Vec3{hi.x + pad, hi.y + pad, hi.z + pad}
+	add_box(doc, {o_lo.x, o_lo.y, o_lo.z}, {lo.x, o_hi.y, o_hi.z})
+	add_box(doc, {hi.x, o_lo.y, o_lo.z}, {o_hi.x, o_hi.y, o_hi.z})
+	add_box(doc, {lo.x, o_lo.y, o_lo.z}, {hi.x, lo.y, o_hi.z})
+	add_box(doc, {lo.x, hi.y, o_lo.z}, {hi.x, o_hi.y, o_hi.z})
+	add_box(doc, {lo.x, lo.y, o_lo.z}, {hi.x, hi.y, lo.z})
+	add_box(doc, {lo.x, lo.y, hi.z}, {hi.x, hi.y, o_hi.z})
+}
+
 convert_bytes :: proc(data: []u8, source_path: string, opts: Options) -> Result {
 	contents := string(data)
 	res: Result
@@ -282,6 +338,10 @@ convert_bytes :: proc(data: []u8, source_path: string, opts: Options) -> Result 
 				prop.raw = path
 			}
 		}
+	}
+
+	if res.target_format == .Source_VMF {
+		seal_world(&res.doc, 1024)
 	}
 
 	// 4. Validation of what is about to be written.

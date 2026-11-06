@@ -294,19 +294,12 @@ tex_axis_string :: proc(axis: geom.Vec3, offset, scale: f64) -> string {
 plane_output_points :: proc(f: ^ir.Face) -> (p0, p1, p2: geom.Vec3) {
 	w := f.winding
 	if len(w) >= 3 {
-		for i in 0 ..< len(w) {
-			for j in i + 1 ..< len(w) {
-				for k in j + 1 ..< len(w) {
-					a := w[k]
-					b := w[j]
-					c := w[i]
-					if p, ok := geom.plane_from_points(a, b, c); ok {
-						if geom.dot(p.normal, f.plane.normal) > 0.999 {
-							return a, b, c
-						}
-					}
-				}
+		q0, q1, q2 := w[2], w[1], w[0]
+		if p, ok := geom.plane_from_points(q0, q1, q2); ok {
+			if geom.dot(p.normal, f.plane.normal) > 0 {
+				return q0, q1, q2
 			}
+			return w[0], w[1], w[2]
 		}
 	}
 	a, b, c := geom.plane_points(f.plane)
