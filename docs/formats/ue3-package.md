@@ -343,14 +343,44 @@ the component reference. The component's `StaticMesh`/`SkeletalMesh` property
 resolves the mesh name. `mapconv` turns a `StaticMeshActor` into a `prop_static`
 entity with `origin`, `angles` and `model` (villyard: 3 915 entities).
 
+## Texture2D: mip data and DDS export
+
+`UTexture2D::Serialize` writes `UTexture`'s data (`SourceArt`, a bulk record),
+then the mip array. Each `FTexture2DMipMap` is a bulk-data record followed by
+`SizeX` and `SizeY`:
+
+| Field | Encoding |
+| --- | --- |
+| `SourceArt` | bulk record: flags (u32), element count, size, offset |
+| mip count | i32 |
+| each mip | bulk record, then `SizeX` (i32), `SizeY` (i32) |
+
+A bulk record is `flags, count, size, offset`; when `BULKDATA_StoreInSeparateFile`
+(bit 0) is clear the payload follows the 16-byte header at `offset == Tell()`.
+Texture properties (`SizeX`, `SizeY`, `Format`, `TextureFileCacheName`) come from
+the normal tag stream; `Format` is a `ByteProperty` whose value is an `FName`
+such as `PF_DXT5`.
+
+When bit 0 is set the mip lives in a **texture file cache** (`.tfc`), which the
+map package does not contain; the mip is reported with its cache name, offset and
+size. CrimeCraft maps mix both: in `EntryLevel`, 29 of 90 textures have inline
+mips and the rest stream the largest mips while the small ones stay inline.
+
+`mapconv extract --input map.ccmap --output dir` writes the leading inline mips
+of each texture as `<name>.dds` (DXT1/3/5, BGRA8, G8, A8) and reports the
+streamed ones. The DDS header follows the classic 124-byte layout with a 32-byte
+pixel-format block.
+
 ## What is not implemented yet
 
 - **Native bodies of other classes.** `ULevel`, `UWorld` and `UModel` start
   with native fields whose layout (BSP nodes/surfs/verts, actor arrays) is not
   implemented yet; only the shared prelude and `UPolys` are read.
-- **Mesh assets and materials.** Actor transforms and mesh *references* are
-  read, but the mesh and texture assets themselves are not converted; the VMF
-  keeps the Unreal asset names.
+- **Streamed texture mips.** Mips in a `.tfc` are not decoded; the cache file is
+  not part of the map package. Inline mips are exported as DDS.
+- **Mesh assets and materials.** Actor transforms, mesh references and texture
+  images are read, but mesh geometry and material graphs are not converted; the
+  VMF keeps the Unreal asset names.
 - **BSP solids.** Node polygons are readable, but turning the node tree into
   convex brushes (the way the Source decompiler does) is not implemented; only
   `UPolys` brush volumes are converted today.

@@ -4,6 +4,7 @@
 //   mapconv convert  --input <file> --output <file> [options]
 //   mapconv inspect  --input <file>
 //   mapconv validate --input <file>
+//   mapconv extract  --input <file.ccmap> --output <dir>
 //
 // Exit codes: 0 success, 1 the conversion produced errors, 2 usage or I/O error.
 package main
@@ -24,6 +25,7 @@ Usage:
   mapconv convert  --input <file> --output <file> [options]
   mapconv inspect  --input <file> [--from <format>]
   mapconv validate --input <file> [--from <format>]
+  mapconv extract  --input <file.ccmap> --output <dir> [--from <format>]
   mapconv --version
 
 Options:
@@ -85,6 +87,8 @@ main :: proc() {
 		run_inspect(args, text)
 	case "validate":
 		run_validate(args, text)
+	case "extract":
+		run_extract(args, text)
 	case:
 		fmt.eprintln(USAGE)
 		os.exit(2)
@@ -167,6 +171,10 @@ parse_args :: proc(argv: []string) -> (args: Args, ok: bool) {
 	}
 	if args.command == "convert" && args.output == "" {
 		fmt.eprintln("mapconv: --output is required for convert")
+		return args, false
+	}
+	if args.command == "extract" && args.output == "" {
+		fmt.eprintln("mapconv: --output is required for extract")
 		return args, false
 	}
 	return args, true
@@ -271,6 +279,69 @@ run_validate :: proc(args: Args, text: string) {
 		os.exit(1)
 	}
 	fmt.printfln("ok: %s", diag.summary(&diagnostics))
+}
+
+// merge_diags appends one diagnostic list to another and frees the source.
+merge_diags :: proc(dst: ^diag.Diagnostics, src: ^diag.Diagnostics) {
+	for item in src.items {
+		append(&dst.items, item)
+		dst.counts[int(item.severity)] += 1
+	}
+	delete(src.items)
+}
+
+// run_extract writes every readable texture of a UE3 package as a DDS file.
+// Streamed mips (texture file cache) and unsupported formats are reported.
+run_extract :: proc(args: Args, text: string) {
+	format := args.from
+	if format == .Unknown {
+		detected, _ := convert.detect_format(args.input, text)
+		format = detected
+	}
+	if format != .UE3_Package {
+		fmt.eprintln("mapconv: extract currently supports UE3 packages (.ccmap) only")
+		os.exit(2)
+	}
+	pkg, diagnostics := ue3.parse(transmute([]u8)text)
+	if diag.has_errors(&diagnostics) {
+		print_diagnostics(&diagnostics, args.quiet, args.report)
+		os.exit(1)
+	}
+	if err := os.make_directory_all(args.output); err != nil {
+		fmt.eprintfln("mapconv: cannot create %q", args.output)
+		os.exit(2)
+	}
+
+	total := 0
+	written := 0
+	skipped := 0
+	for e, i in pkg.exports {
+		if ue3.export_class_name(&pkg, e) != "Texture2D" {
+			continue
+		}
+		total += 1
+		texture, texture_d := ue3.read_texture(&pkg, i)
+		merge_diags(&diagnostics, &texture_d)
+		bytes, ok := ue3.dds_bytes(&texture)
+		if !ok {
+			skipped += 1
+			continue
+		}
+		name := ue3.name_text(&pkg, e.object_name)
+		path := fmt.aprintf("%s/%s.dds", args.output, name)
+		if os.write_entire_file(path, bytes) != nil {
+			fmt.eprintfln("mapconv: cannot write %q", path)
+			os.exit(2)
+		}
+		written += 1
+	}
+	fmt.printfln(
+		"extracted %d texture(s) of %d (%d skipped: streamed or unsupported format)",
+		written,
+		total,
+		skipped,
+	)
+	print_diagnostics(&diagnostics, args.quiet, args.report)
 }
 
 // inspect_package prints the package summary and tables for `mapconv inspect`.

@@ -39,6 +39,7 @@ make test
 mapconv convert  --input <file> --output <file> [options]
 mapconv inspect  --input <file> [--from <format>]
 mapconv validate --input <file> [--from <format>]
+mapconv extract  --input <file.ccmap> --output <dir>
 mapconv --version
 ```
 
@@ -83,6 +84,8 @@ brushes, missing materials) without writing anything.
 - `diag`: three severities, stable namespaced codes, deterministic reports.
 - `profile`: entity class mapping tables, data-driven and replaceable.
 - `kv`: the shared Valve key/value block tree (VMF and the BSP entity lump).
+- `ue3` also reads `Texture2D` objects; `mapconv extract` writes their inline
+  mips as DDS files and reports the ones streamed into a texture cache.
 - `vmf` / `t3d` / `bsp` / `ue3`: format adapters. `bsp` imports compiled Source
   maps by reconstructing brushes from the BSP tree (method of ericw-tools'
   `bsputil --decompile`, see `docs/formats/source-bsp.md`). `ue3` reads the
@@ -172,11 +175,13 @@ Implemented:
 - [x] Actor payloads: the `RF_HasStack` state-frame prelude, then `NetIndex` and
       tagged properties; Location, Rotation, DrawScale and the component's mesh
       reference become `prop_static` entities (`villyard`: 3 915).
+- [x] Texture extraction: `Texture2D` mips to DDS (DXT1/3/5, BGRA8, G8, A8),
+      with streamed mips reported (EntryLevel: 29 inline of 90).
 
 Next, in rough order:
 
-- [ ] Mesh and material assets: convert `StaticMesh` geometry and UE3 materials
-      to Source models/materials, and pack the textures.
+- [ ] Texture file cache support (`.tfc`) for streamed mips, mesh geometry
+      (`StaticMesh` -> models) and UE3 material graphs to Source materials.
 - [ ] Unreal CSG evaluation/reconstruction for subtractive brushes when targeting
       brush-based formats.
 - [ ] GoldSrc `.map` / Valve 220 adapter.

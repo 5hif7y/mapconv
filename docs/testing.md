@@ -34,6 +34,7 @@ failures.
 | UE3 models | `ue3/model_test.odin` — a synthetic `UModel` with one quad node, one surface and four verts: bulk headers, the `TTransArray` owner before the surface count, polygon resolution through `Verts`/`Points`, the size-mismatch warning and a rejected bulk element size |
 | UE3 levels | `ue3/level_test.odin` — a synthetic `ULevel`: the `Actors` owner and references, URL strings/port/validity, model and component references, and actor class resolution |
 | UE3 actors | `ue3/actor_test.odin` — a synthetic `RF_HasStack` actor: the state-frame prelude, `NetIndex` and tagged `Location`/`Rotation`/`DrawScale` read back as an actor transform, plus the component template-owner prefix |
+| UE3 textures | `ue3/texture_test.odin` — a synthetic `Texture2D` with one inline DXT1 4x4 mip: properties, bulk records, DDS header and payload; a streamed mip is reported and produces no DDS |
 | Conversion | `convert/convert_test.odin` — format detection, VMF→T3D (units, mapping, transform note), T3D→VMF (brush actors collapse into the world), geometry round trip, subtractive CSG warning, unmapped class/property reporting, light colour and brightness in both directions, rotation in both directions, `targetname`↔`Tag`, unsupported target, validation |
 
 ## Fixtures
