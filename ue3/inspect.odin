@@ -116,6 +116,32 @@ inspect_text :: proc(pkg: ^Package, path: string) -> string {
 		shown += 1
 	}
 
+	// BSP models hold the level's visible geometry; parse them so the summary
+	// states how much is available (conversion of these polygons is pending).
+	models := 0
+	model_nodes := 0
+	model_surfs := 0
+	model_verts := 0
+	model_poly_count := 0
+	model_errors := 0
+	for e, i in pkg.exports {
+		if export_class_name(pkg, e) != "Model" {
+			continue
+		}
+		models += 1
+		m, m_diags := read_model(pkg, i)
+		defer delete(m_diags.items)
+		if diag.has_errors(&m_diags) {
+			model_errors += 1
+			continue
+		}
+		model_nodes += len(m.nodes)
+		model_surfs += len(m.surfs)
+		model_verts += len(m.verts)
+		polys := model_polygons(&m)
+		model_poly_count += len(polys)
+	}
+
 	if polys_objects > 0 {
 		fmt.sbprintf(
 			&b,
@@ -126,6 +152,22 @@ inspect_text :: proc(pkg: ^Package, path: string) -> string {
 		)
 		if polys_errors > 0 {
 			fmt.sbprintf(&b, ", %d object(s) failed to parse", polys_errors)
+		}
+		strings.write_byte(&b, '\n')
+	}
+
+	if models > 0 {
+		fmt.sbprintf(
+			&b,
+			"bsp models:   %d model(s), %d node(s), %d surface(s), %d vert(s), %d polygon(s)",
+			models,
+			model_nodes,
+			model_surfs,
+			model_verts,
+			model_poly_count,
+		)
+		if model_errors > 0 {
+			fmt.sbprintf(&b, ", %d model(s) failed to parse", model_errors)
 		}
 		strings.write_byte(&b, '\n')
 	}

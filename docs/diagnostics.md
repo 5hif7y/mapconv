@@ -126,6 +126,8 @@ entity id, `world.solid[3].side[2]`) and a source location for parsed text.
 | `ue3.polys-degenerate` | a `UPolys` produced fewer than four usable faces and was skipped |
 | `ue3.no-brush-geometry` | the package has no readable `UPolys` geometry; nothing can be written |
 | `ue3.brush-volumes-only` | summary of what was converted when the level model, actors and materials are still pending |
+| `ue3.bad-model` | a `UModel` field has an implausible size or count |
+| `ue3.model-size-mismatch` | the model parser did not consume the declared `SerialSize`; the layout is suspect |
 
 ### `convert.*`
 

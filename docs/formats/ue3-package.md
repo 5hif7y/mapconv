@@ -231,13 +231,58 @@ would surface.
 `mapconv convert --input map.ccmap --output map.vmf` emits one world brush per
 `UPolys` object (villyard: 361 brushes, 3199 faces, 1.1 MB VMF in 0.4 s).
 
+## UModel: the BSP level model
+
+`UModel::Serialize` (`Engine/Src/UnModel.cpp`) writes the level's BSP tree and
+the polygons of every node. The layout below was verified byte for byte: the
+level models of `EntryLevel` (2 716 B) and `transient_map` (3 364 B) and every
+brush model of `villyard` parse exactly to their declared `SerialSize`.
+
+| Field | Encoding |
+| --- | --- |
+| `Bounds` | `FBoxSphereBounds`: origin (3 f32), box extent (3 f32), sphere radius (f32) = 28 B |
+| `Vectors` | bulk: element size 12, count, `FVector[count]` |
+| `Points` | bulk: element size 12, count, `FVector[count]` |
+| `Nodes` | bulk: element size 64, count, `FBspNode[count]` |
+| `Surfs` | **TTransArray**: owner reference (4 B), count, `FBspSurf[count]` (56 B each) |
+| `Verts` | bulk: element size 24 (16 when cooked for a console), count, `FVert[count]` |
+| `NumSharedSides`, `NumZones` | 2 × i32 |
+| `Zones` | `FZoneProperties[NumZones]`, 24 B each |
+| `Polys` | object reference (4 B) |
+| `LeafHulls`, `Leaves` | bulk arrays |
+| `RootOutside`, `Linked` | 2 × i32 |
+| `PortalNodes` | bulk array |
+| legacy shadow edges | bulk array, present before version 686 |
+| `NumUniqueVertices` | i32 |
+| `VertexBuffer` | bulk: element size 36, `FModelVertex[count]` |
+
+Two quirks cost time and are easy to trip over:
+
+- **`Surfs` is a `TTransArray`**, whose `operator<<` writes the array *owner*
+  before the count. Without those 4 bytes the surface count reads as `803`
+  (the owner index) and every following field is shifted.
+- **Bulk arrays write the element size first**, then the count, then the data.
+  For packages older than the engine build (all of them: 576 vs 10897) the
+  elements are written field by field, so the element size is a struct size and
+  the data must be decoded with the same field order (`FBspNode` is 64 B,
+  `FVert` 24 B on PC).
+
+`FBspNode` exposes the polygon: `Plane`, `iVertPool` and `NumVertices` index the
+vertex pool (`Verts`), each `FVert.pVertex` indexes `Points`, and `iSurf` gives
+the material, flags and texture vectors. `model_polygons` resolves that chain;
+`mapconv inspect` reports the totals ("bsp models: 2 model(s), 6 node(s), …").
+
+Reconstructing **convex solids** from those polygons and the node tree is the
+next stage; the nodes are surfaces, not closed brushes.
+
 ## What is not implemented yet
 
 - **Native bodies of other classes.** `ULevel`, `UWorld` and `UModel` start
   with native fields whose layout (BSP nodes/surfs/verts, actor arrays) is not
   implemented yet; only the shared prelude and `UPolys` are read.
-- **Converting brush polygons to IR.** The polygons are readable; mapping them
-  to brush faces, CSG semantics and materials is the next stage.
+- **BSP solids.** Node polygons are readable, but turning the node tree into
+  convex brushes (the way the Source decompiler does) is not implemented; only
+  `UPolys` brush volumes are converted today.
 - **Compressed chunks.** None of the map packages use them. The summary fields
   and the three codecs (`COMPRESS_ZLIB 1`, `COMPRESS_LZO 2`, `COMPRESS_LZX 4`)
   are surfaced, but payload decompression is not implemented.
