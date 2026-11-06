@@ -320,5 +320,28 @@ inspect_text :: proc(pkg: ^Package, path: string) -> string {
 		}
 	}
 
+	shown_material := 0
+	for e in pkg.exports {
+		class := export_class_name(pkg, e)
+		if (class != "MaterialInstanceConstant" && class != "Material") || shown_material >= 3 {
+			continue
+		}
+		head, hd := read_object_head(pkg, e)
+		if !diag.has_errors(&hd) {
+			fmt.sbprintf(&b, "material %s:\n", name_text(pkg, e.object_name))
+			for tag in head.tags {
+				if !strings.contains(tag_name(pkg, tag), "Texture") {
+					continue
+				}
+				fmt.sbprintf(&b, "  %s size %d idx %d:", tag_name(pkg, tag), tag.size, tag.array_index)
+				for k in 0..<min(int(tag.size), 16) {
+					fmt.sbprintf(&b, " %02x", pkg.data[tag.value_offset + k])
+				}
+				strings.write_byte(&b, '\n')
+			}
+			shown_material += 1
+		}
+	}
+
 	return strings.to_string(b)
 }

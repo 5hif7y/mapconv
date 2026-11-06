@@ -521,6 +521,25 @@ run_extract :: proc(args: Args, text: string) {
 		ue3.content_index_destroy(&index)
 	}
 
+	material_files := 0
+	for e, i in pkg.exports {
+		class := ue3.export_class_name(&pkg, e)
+		if class != "Material" && class != "MaterialInstanceConstant" {
+			continue
+		}
+		info, md := ue3.read_material_texture(&pkg, i)
+		merge_diags(&diagnostics, &md)
+		if !info.has_texture {
+			continue
+		}
+		dir := fmt.aprintf("%s/materials/mapconv", args.output)
+		_ = os.make_directory_all(dir)
+		path := fmt.aprintf("%s/%s.vmt", dir, info.material_name)
+		if os.write_entire_file(path, ue3.material_vmt(info)) == nil {
+			material_files += 1
+		}
+	}
+
 	// Static meshes embedded in the package: one OBJ per LOD, under a directory
 	// named after the map, mirroring the "<package>/<mesh>.mdl" path the VMF
 	// references after studiomdl.
