@@ -481,3 +481,29 @@ expects; the compiler is not part of this toolkit.
 UVs come from the legacy interleaved buffer (`FLegacyStaticMeshFullVertex`:
 TangentX, TangentZ, Color, then `NumTexCoords` float16 pairs). SMD flips V
 because StudioMDL's texture space is bottom-up.
+
+## Texture mip records (verified on `city01_FFA`)
+
+Each `FTexture2DMipMap` is four 32-bit fields, then the dimensions:
+
+```text
+flags | uncompressed_size | compressed_size | offset | width | height
+```
+
+Measured on `industrial_pr_VentSet_ds` (512x512 DXT1):
+
+| Field | Value | Check |
+| --- | ---: | --- |
+| flags | `0x11` | `StoreInSeparateFile (0x1) + CompressZLIB (0x10)` |
+| uncompressed_size | 131072 | exactly 512x512 DXT1 |
+| compressed_size | 127285 | zlib stream size |
+| offset | 36 518 706 | continues at 36 646 017 for mip 1 (+127 311) |
+
+The offsets are consistent and contiguous, but **no file in the preserved
+install exceeds 30 MB**, so the cache those offsets address is not part of the
+copy. The reader keeps the record and reports the mip as streamed.
+
+Most textures keep a run of smaller mips inline. `dds_bytes` skips the streamed
+prefix and writes the DDS at the largest inline mip: EntryLevel goes from 29 to
+81 extracted textures of 90, at reduced resolution. There is no `.tfc` reader
+yet; if a cache appears, the offset/size above are all it needs.
