@@ -39,7 +39,7 @@ make test
 mapconv convert  --input <file> --output <file> [options]
 mapconv inspect  --input <file> [--from <format>]
 mapconv validate --input <file> [--from <format>]
-mapconv extract  --input <file.ccmap|ccpk> --output <dir> [--content <dir>]   # DDS + OBJ/SMD/QC
+mapconv extract  --input <file.ccmap|ccpk|bsp> --output <dir> [--content <dir>]   # DDS + OBJ/SMD/QC or BSP pakfile
 mapconv audit    --input <file>   # byte coverage: interprets vs skips, by class
 mapconv --version
 ```
@@ -191,6 +191,8 @@ Implemented:
       interleaved vertex buffer, shadow extrusion, 16-bit indices, UV set 0);
       `extract` writes one OBJ per LOD (EngineMeshes: 3 meshes; city01: 2 meshes,
       3 LODs).
+- [x] Source BSP pakfile: read the embedded ZIP (store and deflate) and write
+      every entry (VTF/VMT/sounds); `cs_assault`: 214 entries, 3.9 MB.
 - [x] Byte-coverage audit: `mapconv audit` reports the bytes interpreted per
       class (all 218 maps: 49.66 % of 5.33 GB; see `AUDIT.md`).
 - [x] Content resolution: a `CookedPC` index maps package names to `.ccpk` files;

@@ -14,6 +14,7 @@ import "core:fmt"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
+import "bsp"
 import "convert"
 import "diag"
 import "ir"
@@ -290,6 +291,52 @@ run_validate :: proc(args: Args, text: string) {
 	fmt.printfln("ok: %s", diag.summary(&diagnostics))
 }
 
+// run_extract_bsp writes the pakfile entries of a Source BSP (lump 40), which
+// holds the VTF/VMT assets the map carries for itself.
+run_extract_bsp :: proc(args: Args, text: string) {
+	data := transmute([]u8)text
+	diagnostics := diag.init()
+	file, _ := bsp.read(data, &diagnostics, args.input)
+	if diag.has_errors(&diagnostics) {
+		print_diagnostics(&diagnostics, args.quiet, args.report)
+		os.exit(1)
+	}
+	if err := os.make_directory_all(args.output); err != nil {
+		fmt.eprintfln("mapconv: cannot create %q", args.output)
+		os.exit(2)
+	}
+	offset, length := file.header[bsp.LUMP_PAKFILE][0], file.header[bsp.LUMP_PAKFILE][1]
+	entries, pak_d := bsp.read_pakfile(data, offset, length)
+	merge_diags(&diagnostics, &pak_d)
+	written := 0
+	skipped := 0
+	bytes := 0
+	for entry in entries {
+		payload, ok := bsp.pak_entry_data(data, entry)
+		if !ok {
+			skipped += 1
+			continue
+		}
+		path := fmt.aprintf("%s/%s", args.output, entry.name)
+		defer delete(path)
+		dir := filepath.dir(path)
+		if len(dir) > 0 {
+			_ = os.make_directory_all(dir)
+		}
+		if os.write_entire_file(path, payload) != nil {
+			fmt.eprintfln("mapconv: cannot write %q", path)
+			os.exit(2)
+		}
+		written += 1
+		bytes += len(payload)
+		if entry.method == 8 {
+			delete(payload)
+		}
+	}
+	fmt.printfln("extracted %d of %d pakfile entr(ies), %d bytes (%d skipped)", written, len(entries), bytes, skipped)
+	print_diagnostics(&diagnostics, args.quiet, args.report)
+}
+
 // run_audit reports how many bytes of a UE3 package the reader interprets.
 run_audit :: proc(args: Args, text: string) {
 	pkg, diagnostics := ue3.parse(transmute([]u8)text)
@@ -321,8 +368,12 @@ run_extract :: proc(args: Args, text: string) {
 		detected, _ := convert.detect_format(args.input, text)
 		format = detected
 	}
+	if format == .Source_BSP {
+		run_extract_bsp(args, text)
+		return
+	}
 	if format != .UE3_Package {
-		fmt.eprintln("mapconv: extract currently supports UE3 packages (.ccmap) only")
+		fmt.eprintln("mapconv: extract supports UE3 packages (.ccmap/.ccpk) and Source BSPs")
 		os.exit(2)
 	}
 	pkg, diagnostics := ue3.parse(transmute([]u8)text)
