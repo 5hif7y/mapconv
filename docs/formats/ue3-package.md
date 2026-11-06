@@ -4,9 +4,9 @@ CrimeCraft ships its maps as cooked Unreal Engine 3 packages with the `.ccmap`
 extension. Internally they are ordinary UE3 packages: a header with a summary,
 three index tables, and per-object payloads addressed from the export table.
 
-`mapconv` reads the first stage — summary, names, imports, exports — in package
-`ue3`. Deserializing object payloads (`Level`, `Model`, `Brush`, `Polys`,
-materials) is the next stage and is not implemented yet.
+`mapconv` reads the summary, names, imports and exports in package `ue3`, and
+then deserializes the object payloads it needs: actors, models, brushes, brush
+polygons, textures and static mesh geometry. Materials are not read yet.
 
 Everything below was verified against **all 218 `.ccmap` files** in the
 CrimeCraft install; every one of them is identical in the fields marked
@@ -402,3 +402,55 @@ pixel-format block.
 - `Development/Src/Core/Inc/UnObjBas.h` — `EPackageFlags`.
 - Package `ue3` in this repository; tests in `ue3/ue3_test.odin` build a
   synthetic 576/5 package byte by byte.
+
+## StaticMesh geometry
+
+`UStaticMesh::Serialize` at version 576 takes every legacy branch: the compact
+kDOP tree (770), source data (823), mesh proxies (859) and separate vertex color
+(801) are all newer than the package. Each LOD still carries the interleaved
+tangent/UV/color buffer and the shadow extrusion buffer, and its position buffer
+contains the cloned shadow-volume vertices that `RemoveLegacyShadowVolumeVertices`
+trims on load.
+
+The layout below was verified byte for byte against `EngineMeshes.ccpak`
+(BackgroundCube 138 vertices / 204 triangles, Cube 24 / 12, Sphere 323 / 528) and
+against the meshes embedded in `instance/city01_FFA.ccmap` (three LODs).
+
+```text
+body
+  Bounds                    28   FBoxSphereBounds
+  BodySetup                  4   FPackageIndex
+  legacy kDOP tree               bulk nodes (32 B) + bulk triangles (8 B)
+  InternalVersion            4   18
+  legacy content tags        4 + 8n   only when version < 593
+  LODModels                  4 + n × FStaticMeshRenderData
+  LODInfo                    4   elements write no payload (editor-only)
+  LODDistanceRatio … ThumbnailDistance  24
+
+FStaticMeshRenderData
+  RawTriangles               flags, count, size, offset; inline 272 B/element
+  Elements                   count + (36 B + 8·fragments)/element
+  PositionVertexBuffer       stride (12), count, bulk (12)
+  LegacyVertexBuffer         NumTexCoords, stride, count, bUseFullPrecisionUVs,
+                             bulk (stride)
+  LegacyExtrusionBuffer      stride, count, bulk (stride)
+  NumVertices                4   real count, excludes shadow clones
+  IndexBuffer                bulk of 16-bit indices (element size 2)
+  WireframeIndexBuffer       bulk of 16-bit indices
+  LegacyEdges                bulk of FMeshEdge (16 B)
+  LegacyShadowDoubleSided    count + bytes
+```
+
+`Elements` holds `Material` (FPackageIndex), three collision/shadow flags, the
+index range, the vertex range, the material override index and the fragment
+ranges. `RawTriangles` elements are `FStaticMeshTriangle` at 272 bytes: three
+vertex indices, 8 UV sets, three colors, material/fragment/smoothing bookkeeping
+and the overridden tangent basis.
+
+Geometry extraction uses the position and index buffers, not `RawTriangles`
+(cooked meshes ship it empty): positions `[0, NumVertices)`, indices as one-based
+`f` records in OBJ. Both stay in Unreal coordinates (X forward, Y right, Z up);
+`xform` is the place for axis conversion.
+
+The reader refuses packages at or above `VER_REMOVED_SHADOW_VOLUMES` (686)
+instead of silently misreading a newer buffer layout.

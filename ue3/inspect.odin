@@ -275,5 +275,50 @@ inspect_text :: proc(pkg: ^Package, path: string) -> string {
 		}
 	}
 
+	mesh_count := 0
+	for e in pkg.exports {
+		if export_is_static_mesh(pkg, e) {
+			mesh_count += 1
+		}
+	}
+	if mesh_count > 0 {
+		fmt.sbprintf(&b, "static meshes: %d\n", mesh_count)
+		mesh_shown := 0
+		for e, i in pkg.exports {
+			if !export_is_static_mesh(pkg, e) {
+				continue
+			}
+			if mesh_shown == 8 {
+				fmt.sbprintf(&b, "  ... %d more\n", mesh_count - mesh_shown)
+				break
+			}
+			mesh, mesh_d := read_static_mesh(pkg, i)
+			name := name_text(pkg, e.object_name)
+			if diag.has_errors(&mesh_d) {
+				first := mesh_d.items[0]
+				fmt.sbprintf(&b, "  %-28s (unreadable: %s)\n", name, first.message)
+			} else if len(mesh.lods) == 0 {
+				fmt.sbprintf(&b, "  %-28s no LODs\n", name)
+			} else {
+				lod := mesh.lods[0]
+				o := mesh.bounds.origin
+				x := mesh.bounds.box_extent
+				fmt.sbprintf(
+					&b,
+					"  %-28s LODs %d, %d vert(s), %d tri(s), (%.0f, %.0f, %.0f)..(%.0f, %.0f, %.0f)\n",
+					name,
+					len(mesh.lods),
+					len(lod.positions),
+					len(lod.indices) / 3,
+					o.x - x.x, o.y - x.y, o.z - x.z,
+					o.x + x.x, o.y + x.y, o.z + x.z,
+				)
+			}
+			static_mesh_destroy(&mesh)
+			delete(mesh_d.items)
+			mesh_shown += 1
+		}
+	}
+
 	return strings.to_string(b)
 }

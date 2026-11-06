@@ -4,7 +4,7 @@
 //   mapconv convert  --input <file> --output <file> [options]
 //   mapconv inspect  --input <file>
 //   mapconv validate --input <file>
-//   mapconv extract  --input <file.ccmap> --output <dir>
+//   mapconv extract  --input <file.ccmap> --output <dir>   (DDS + OBJ)
 //
 // Exit codes: 0 success, 1 the conversion produced errors, 2 usage or I/O error.
 package main
@@ -25,7 +25,7 @@ Usage:
   mapconv convert  --input <file> --output <file> [options]
   mapconv inspect  --input <file> [--from <format>]
   mapconv validate --input <file> [--from <format>]
-  mapconv extract  --input <file.ccmap> --output <dir> [--from <format>]
+  mapconv extract  --input <file.ccmap|ccpk> --output <dir>   DDS textures + OBJ meshes
   mapconv --version
 
 Options:
@@ -315,6 +315,8 @@ run_extract :: proc(args: Args, text: string) {
 	total := 0
 	written := 0
 	skipped := 0
+	meshes := 0
+	obj_files := 0
 	for e, i in pkg.exports {
 		if ue3.export_class_name(&pkg, e) != "Texture2D" {
 			continue
@@ -335,11 +337,40 @@ run_extract :: proc(args: Args, text: string) {
 		}
 		written += 1
 	}
+	// Static meshes: one OBJ per LOD, in Unreal coordinates (Z up). The geometry
+	// is self-contained in the package; materials are a later stage.
+	for e, i in pkg.exports {
+		if !ue3.export_is_static_mesh(&pkg, e) {
+			continue
+		}
+		meshes += 1
+		mesh, mesh_d := ue3.read_static_mesh(&pkg, i)
+		merge_diags(&diagnostics, &mesh_d)
+		for lod_index in 0..<len(mesh.lods) {
+			obj := ue3.static_mesh_obj(&mesh, lod_index)
+			if len(obj) == 0 {
+				continue
+			}
+			name := ue3.name_text(&pkg, e.object_name)
+			path := fmt.aprintf("%s/%s_L%d.obj", args.output, name, lod_index)
+			defer delete(path)
+			if os.write_entire_file(path, obj) != nil {
+				fmt.eprintfln("mapconv: cannot write %q", path)
+				os.exit(2)
+			}
+			obj_files += 1
+			delete(obj)
+		}
+		ue3.static_mesh_destroy(&mesh)
+	}
+
 	fmt.printfln(
-		"extracted %d texture(s) of %d (%d skipped: streamed or unsupported format)",
+		"extracted %d texture(s) of %d (%d skipped: streamed or unsupported format), %d OBJ file(s) from %d static mesh(es)",
 		written,
 		total,
 		skipped,
+		obj_files,
+		meshes,
 	)
 	print_diagnostics(&diagnostics, args.quiet, args.report)
 }

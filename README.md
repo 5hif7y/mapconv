@@ -14,7 +14,7 @@ Supported directions today:
 ```text
 Source 1 .vmf  <->  IR  <->  .t3d  Unreal Engine 3
 Source 1 .bsp  ->   IR  <->  .t3d  Unreal Engine 3        (BSP is import-only)
-UE3 .ccmap     ->  (tables only: inspect/validate)        (payload reader pending)
+UE3 .ccmap     ->  IR -> .vmf/.t3d, textures, mesh OBJ     (cooked package reader)
 ```
 
 The architecture is format-pair independent: every adapter converts through the
@@ -39,7 +39,7 @@ make test
 mapconv convert  --input <file> --output <file> [options]
 mapconv inspect  --input <file> [--from <format>]
 mapconv validate --input <file> [--from <format>]
-mapconv extract  --input <file.ccmap> --output <dir>
+mapconv extract  --input <file.ccmap|ccpk> --output <dir>   # DDS + OBJ
 mapconv --version
 ```
 
@@ -84,8 +84,9 @@ brushes, missing materials) without writing anything.
 - `diag`: three severities, stable namespaced codes, deterministic reports.
 - `profile`: entity class mapping tables, data-driven and replaceable.
 - `kv`: the shared Valve key/value block tree (VMF and the BSP entity lump).
-- `ue3` also reads `Texture2D` objects; `mapconv extract` writes their inline
-  mips as DDS files and reports the ones streamed into a texture cache.
+- `ue3` also reads `Texture2D` objects and `UStaticMesh` geometry; `mapconv
+  extract` writes inline texture mips as DDS files (streamed mips are reported)
+  and one OBJ per static mesh LOD.
 - `vmf` / `t3d` / `bsp` / `ue3`: format adapters. `bsp` imports compiled Source
   maps by reconstructing brushes from the BSP tree (method of ericw-tools'
   `bsputil --decompile`, see `docs/formats/source-bsp.md`). `ue3` reads the
@@ -180,11 +181,14 @@ Implemented:
 - [x] Light actors: Brightness and LightColor from the light component become
       Source `light`/`light_spot`/`light_environment` entities with `_light`
       (villyard: 169 lights, EntryLevel: 16).
+- [x] Static mesh geometry: the 576 legacy render-data path (kDOP tree, legacy
+      interleaved vertex buffer, shadow extrusion, 16-bit indices); `extract`
+      writes one OBJ per LOD (EngineMeshes: 3 meshes; city01: 2 meshes, 3 LODs).
 
 Next, in rough order:
 
-- [ ] Texture file cache support (`.tfc`) for streamed mips, mesh geometry
-      (`StaticMesh` -> models) and UE3 material graphs to Source materials.
+- [ ] Texture file cache support (`.tfc`) for streamed mips and UE3 material
+      graphs to Source materials; compile extracted OBJ meshes into Source models.
 - [ ] Unreal CSG evaluation/reconstruction for subtractive brushes when targeting
       brush-based formats.
 - [ ] GoldSrc `.map` / Valve 220 adapter.
