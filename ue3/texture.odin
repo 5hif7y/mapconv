@@ -199,24 +199,45 @@ dds_bytes :: proc(texture: ^Texture) -> ([]u8, bool) {
 	if format == .Unknown {
 		return nil, false
 	}
+	// The largest mips may be streamed; the longest inline run starting at the
+	// first available mip still yields a valid (lower-resolution) DDS.
+	first := 0
+	for first < len(texture.mips) && len(texture.mips[first].data) == 0 {
+		first += 1
+	}
+	if first >= len(texture.mips) {
+		return nil, false
+	}
 	inline_count := 0
-	for mip in texture.mips {
+	for mip in texture.mips[first:] {
 		if len(mip.data) == 0 {
 			break
 		}
 		inline_count += 1
 	}
-	if inline_count == 0 {
-		return nil, false
+	width := texture.mips[first].width
+	height := texture.mips[first].height
+	linear := width * height
+	#partial switch format {
+	case .DXT1:
+		linear = max(1, (width + 3) / 4) * max(1, (height + 3) / 4) * 8
+	case .DXT3, .DXT5:
+		linear = max(1, (width + 3) / 4) * max(1, (height + 3) / 4) * 16
+	case .BGRA8:
+		linear = width * height * 4
+	case .G8:
+		linear = width * height
+	case:
+		linear = width * height
 	}
 
 	out := make([dynamic]u8, 0, 128 + 64 * 1024)
 	append(&out, ..transmute([]u8)string("DDS "))
 	append_u32(&out, 124) // dwSize
 	append_u32(&out, 0x00021007) // CAPS|HEIGHT|WIDTH|PIXELFORMAT|LINEARSIZE|MIPMAPCOUNT
-	append_u32(&out, u32(texture.height))
-	append_u32(&out, u32(texture.width))
-	append_u32(&out, u32(texture.mips[0].size)) // linear size of the top mip
+	append_u32(&out, u32(height))
+	append_u32(&out, u32(width))
+	append_u32(&out, u32(linear)) // linear size of the first written mip
 	append_u32(&out, 0) // depth
 	append_u32(&out, u32(inline_count))
 	for _ in 0..<11 {
@@ -285,7 +306,7 @@ dds_bytes :: proc(texture: ^Texture) -> ([]u8, bool) {
 	append_u32(&out, 0) // reserved2
 
 	for i in 0..<inline_count {
-		append(&out, ..texture.mips[i].data)
+		append(&out, ..texture.mips[first + i].data)
 	}
 	return out[:], true
 }
