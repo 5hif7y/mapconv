@@ -21,6 +21,9 @@ Format :: enum {
 	Source_VMF,
 	Source_BSP,
 	Unreal_T3D,
+	// Cooked Unreal Engine 3 package (.ccmap). Import to the IR is pending;
+	// the package tables are readable today (see package ue3).
+	UE3_Package,
 	Goldsrc_MAP,
 	Valve_220,
 }
@@ -35,6 +38,8 @@ format_name :: proc(f: Format) -> string {
 		return "source1-bsp"
 	case .Unreal_T3D:
 		return "unreal3-t3d"
+	case .UE3_Package:
+		return "ue3-package"
 	case .Goldsrc_MAP:
 		return "goldsrc-map"
 	case .Valve_220:

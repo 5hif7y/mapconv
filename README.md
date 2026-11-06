@@ -4,8 +4,9 @@ A multi-format, bidirectional map conversion toolkit for game engines and moddin
 workflows, built around a shared, engine-independent intermediate representation.
 
 **Status: early development.** The Source 1 VMF and BSP adapters, the Unreal
-Engine 3 T3D adapter, the canonical IR, the coordinate/unit transforms, the
-diagnostics pipeline and the CLI exist and are tested. Conversion is *not*
+Engine 3 T3D adapter, the UE3 package table reader, the canonical IR, the
+coordinate/unit transforms, the diagnostics pipeline and the CLI exist and are
+tested. Conversion is *not*
 lossless; every approximation is reported. The CLI is not yet a stable contract.
 
 Supported directions today:
@@ -13,6 +14,7 @@ Supported directions today:
 ```text
 Source 1 .vmf  <->  IR  <->  .t3d  Unreal Engine 3
 Source 1 .bsp  ->   IR  <->  .t3d  Unreal Engine 3        (BSP is import-only)
+UE3 .ccmap     ->  (tables only: inspect/validate)        (payload reader pending)
 ```
 
 The architecture is format-pair independent: every adapter converts through the
@@ -42,7 +44,7 @@ mapconv --version
 
 | Option | Meaning |
 | --- | --- |
-| `--from vmf|t3d` | override the input format (otherwise detected by extension, then by content) |
+| `--from vmf|bsp|t3d|ccmap` | override the input format (otherwise detected by extension, then by content) |
 | `--to vmf|t3d` | override the output format (otherwise detected from the output path) |
 | `--profile <name>` | entity mapping profile: `default`, `source1-to-unreal3`, `unreal3-to-source1` |
 | `--report <file>` | write the diagnostic report to a file as well as stderr |
@@ -65,7 +67,7 @@ brushes, missing materials) without writing anything.
 | Source 1 VMF (`.vmf`, format 100) | yes | yes | solids, sides, planes, texture axes, entity key/values, editor and unknown blocks preserved |
 | Source 1 BSP (`.bsp`, version 20) | yes | no | world brushes reconstructed from the BSP tree, brush entities read from the brush lumps; displacements and baked data reported |
 | Unreal Engine 3 T3D (`.t3d`) | yes | yes | actors, brushes, polygons, surface flags, materials, unknown properties preserved |
-| CrimeCraft cooked packages (`.ccmap`) | no | no | UE3 package reader is the next phase (see roadmap) |
+| CrimeCraft cooked packages (`.ccmap`) | tables | no | summary, name, import and export tables (`inspect`/`validate`); object payloads and IR import are the next phase |
 | GoldSrc `.map`, Valve 220 | no | no | format identifiers reserved; no adapter yet |
 | Source 2, other engines | no | no | separate research |
 
@@ -81,9 +83,11 @@ brushes, missing materials) without writing anything.
 - `diag`: three severities, stable namespaced codes, deterministic reports.
 - `profile`: entity class mapping tables, data-driven and replaceable.
 - `kv`: the shared Valve key/value block tree (VMF and the BSP entity lump).
-- `vmf` / `t3d` / `bsp`: format adapters. `bsp` imports compiled Source maps by
-  reconstructing brushes from the BSP tree (method of ericw-tools'
-  `bsputil --decompile`, see `docs/formats/source-bsp.md`).
+- `vmf` / `t3d` / `bsp` / `ue3`: format adapters. `bsp` imports compiled Source
+  maps by reconstructing brushes from the BSP tree (method of ericw-tools'
+  `bsputil --decompile`, see `docs/formats/source-bsp.md`). `ue3` reads the
+  header and tables of cooked UE3 packages (`.ccmap`), see
+  `docs/formats/ue3-package.md`.
 - `convert`: orchestration, entity mapping, validation, fidelity reporting,
   `inspect` summaries.
 
@@ -114,7 +118,7 @@ Bidirectional does not mean lossless. Current, documented behaviour:
 CS:S / CSSO .bsp  -> mapconv -> .vmf  -> Hammer + VBSP -> playable Source map
                              \-> .t3d -> UnrealEd import -> cook -> CrimeCraft .ccmap
 
-CrimeCraft .ccmap -> (not implemented yet) -> IR -> .vmf / .t3d
+CrimeCraft .ccmap -> package tables (implemented) -> object graph (next) -> IR -> .vmf / .t3d
 ```
 
 `mapconv` deliberately stops at the editors' text formats for writing: it does not
@@ -151,12 +155,14 @@ Implemented:
 - [x] Bidirectional fixtures, validation and conversion reports.
 - [x] Source 1 BSP importer: brush entities from the brush lumps, world geometry
       reconstructed from the BSP tree.
+- [x] UE3 cooked package tables (`.ccmap`): summary, names, imports and exports,
+      verified against all 218 CrimeCraft map packages.
 
 Next, in rough order:
 
-- [ ] Unreal Engine 3 cooked package reader (`.ccmap`): package header, name and
-      export tables, LZO/LZX chunks, and the `Brush`/`Model`/`Polys` object graph
-      needed to read CrimeCraft maps.
+- [ ] Unreal Engine 3 object payloads (`.ccmap`): property tags and the
+      `Level`/`Model`/`Brush`/`Polys` object graph, with compressed chunks
+      (ZLIB/LZO/LZX) if a package uses them.
 - [ ] Unreal CSG evaluation/reconstruction for subtractive brushes when targeting
       brush-based formats.
 - [ ] GoldSrc `.map` / Valve 220 adapter.

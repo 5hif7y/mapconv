@@ -14,6 +14,7 @@ import "core:strings"
 import "convert"
 import "diag"
 import "ir"
+import "ue3"
 
 VERSION :: "0.1.0"
 
@@ -28,7 +29,7 @@ Usage:
 Options:
   --input <file>       map to read
   --output <file>      map to write (convert only)
-  --from <format>      override the input format: vmf, bsp, t3d
+  --from <format>      override the input format: vmf, bsp, t3d, ccmap
   --to <format>        override the output format: vmf, t3d
   --profile <name>     entity mapping profile (default, source1-to-unreal3,
                        unreal3-to-source1)
@@ -40,6 +41,7 @@ Supported formats:
   vmf   Source 1 Valve Map Format (text)
   bsp   Source 1 compiled map (import only)
   t3d   Unreal Engine 3 T3D text interchange
+  ccmap Unreal Engine 3 cooked package (inspect/validate only for now)
 
 Bidirectional support is implemented for both; conversion is not lossless and
 every approximation is reported as a diagnostic.
@@ -194,6 +196,25 @@ run_convert :: proc(args: Args, text: string) {
 		os.exit(2)
 	}
 
+	source := args.from
+	if source == .Unknown {
+		source, _ = convert.detect_format(args.input, text)
+	}
+	if source == .UE3_Package {
+		d := diag.init()
+		diag.err(
+			&d,
+			"ue3.convert-unsupported",
+			"UE3 package import is not implemented yet; `mapconv inspect` reads the package tables",
+		)
+		print_diagnostics(&d, false, args.report)
+		os.exit(1)
+	}
+	if target == .UE3_Package {
+		fmt.eprintln("mapconv: UE3 packages are not an output format; write a .t3d for UnrealEd instead")
+		os.exit(2)
+	}
+
 	options := convert.Options {
 		from             = args.from,
 		to               = target,
@@ -226,6 +247,10 @@ run_inspect :: proc(args: Args, text: string) {
 		detected, _ := convert.detect_format(args.input, text)
 		format = detected
 	}
+	if format == .UE3_Package {
+		inspect_package(text, args.input, args.quiet, args.report)
+		return
+	}
 	doc, diagnostics := import_only(text, args.input, format)
 	if diag.has_errors(&diagnostics) {
 		print_diagnostics(&diagnostics, args.quiet, args.report)
@@ -244,9 +269,41 @@ run_validate :: proc(args: Args, text: string) {
 		detected, _ := convert.detect_format(args.input, text)
 		format = detected
 	}
+	if format == .UE3_Package {
+		validate_package(text, args.input, args.report)
+		return
+	}
 	doc, diagnostics := import_only(text, args.input, format)
 	convert.validate_document(&doc, &diagnostics)
 	print_diagnostics(&diagnostics, false, args.report)
+	if diag.has_errors(&diagnostics) {
+		fmt.eprintfln("mapconv: validation failed: %s", diag.summary(&diagnostics))
+		os.exit(1)
+	}
+	fmt.printfln("ok: %s", diag.summary(&diagnostics))
+}
+
+// inspect_package prints the package summary and tables for `mapconv inspect`.
+inspect_package :: proc(text, path: string, quiet: bool, report: string) {
+	pkg, diagnostics := ue3.parse(transmute([]u8)text)
+	if diag.has_errors(&diagnostics) {
+		print_diagnostics(&diagnostics, quiet, report)
+		os.exit(1)
+	}
+	if !quiet {
+		fmt.print(ue3.inspect_text(&pkg, path))
+	}
+	fmt.printfln("diagnostics: %s", diag.summary(&diagnostics))
+	if !quiet {
+		print_diagnostics(&diagnostics, quiet, report)
+	}
+}
+
+// validate_package parses the package and reports structural problems. There is
+// no semantic validation yet because the IR import is pending.
+validate_package :: proc(text, path: string, report: string) {
+	_, diagnostics := ue3.parse(transmute([]u8)text)
+	print_diagnostics(&diagnostics, false, report)
 	if diag.has_errors(&diagnostics) {
 		fmt.eprintfln("mapconv: validation failed: %s", diag.summary(&diagnostics))
 		os.exit(1)

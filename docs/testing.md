@@ -29,6 +29,7 @@ failures.
 | VMF | `vmf/vmf_test.odin` — tokenizer escapes/comments, plane parsing, texture axes, fixture import (6 faces, materials, entities), unknown-key namespacing, export/import round trip, malformed input, subtractive-CSG warning |
 | T3D | `t3d/t3d_test.odin` — tokenizer quoting, vector/rotation parsing, nesting, fixture import (6 polygons, flags, rotation), export/import round trip, malformed blocks, missing map, polygon-list fragment |
 | BSP | `bsp/bsp_test.odin` — a synthetic Source BSP 20 with an entity brush: lump parsing, texture names, brush sides, leaf/brush ownership, model 1, and rejection of a file without the VBSP signature |
+| UE3 packages | `ue3/ue3_test.odin` — a synthetic 576/5 package assembled byte by byte: summary fields and offsets, name entries with 64-bit flags, UTF-16 name entries, import/export records, `FPackageIndex` resolution, `FName` number suffix, table-bound checks, and rejection of a bad tag or a truncated file |
 | Conversion | `convert/convert_test.odin` — format detection, VMF→T3D (units, mapping, transform note), T3D→VMF (brush actors collapse into the world), geometry round trip, subtractive CSG warning, unmapped class/property reporting, light colour and brightness in both directions, rotation in both directions, `targetname`↔`Tag`, unsupported target, validation |
 
 ## Fixtures
@@ -38,6 +39,7 @@ failures.
 | `tests/fixtures/source/cube.vmf` | 128-unit cube, `light`, `info_player_start`, one material, `skyname`, `visgroups`, `viewsettings` | authored for this repository from `docs/formats/vmf.md` |
 | `tests/fixtures/unreal/cube.t3d` | brush actor with six polygons (±128 units), `PointLight`, one material, `Flags=1` | authored for this repository from the UE3 exporter grammar in `docs/formats/t3d.md` |
 | `examples/CSSO maps/**/*.bsp` | 76 real CS:S maps | used manually for BSP smoke tests (`mapconv inspect`/`convert`); not part of the test suite and not redistributed with the repository |
+| `examples/CrimeCraft maps/**/*.ccmap` | 218 real UE3 cooked packages | used manually for package smoke tests (`mapconv inspect`/`validate`); all 218 were checked while documenting the layout in `docs/formats/ue3-package.md`; not part of the test suite |
 
 Both are redistributable with the project. Larger, game-specific fixtures should
 be added with provenance and redistribution permission recorded here.
@@ -47,6 +49,7 @@ be added with provenance and redistribution permission recorded here.
 - byte-for-byte round trips (serializers normalise order, ids and formatting by
   design; tests compare semantics instead),
 - real engine-produced maps (only hand-authored fixtures),
+- UE3 object payloads, properties and compressed chunks (tables only),
 - CSG evaluation and convex decomposition,
 - resource/asset resolution,
 - CLI end-to-end tests (the CLI is exercised manually; see the examples in

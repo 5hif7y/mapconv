@@ -52,6 +52,8 @@ format_from_extension :: proc(path: string) -> ir.Format {
 		return .Source_BSP
 	case strings.has_suffix(lower, ".t3d"):
 		return .Unreal_T3D
+	case strings.has_suffix(lower, ".ccmap"):
+		return .UE3_Package
 	case strings.has_suffix(lower, ".map"):
 		return .Valve_220
 	}
@@ -74,10 +76,20 @@ detect_format :: proc(path: string, contents: string) -> (format: ir.Format, by_
 			}
 			return .Unknown, false
 		}
+		if by_extension == .UE3_Package {
+			// Package tag 0x9E2A83C1, little-endian: C1 83 2A 9E.
+			if has_package_tag(contents) {
+				return .UE3_Package, false
+			}
+			return .Unknown, false
+		}
 		return by_extension, false
 	}
 	lower := strings.to_lower(head)
 	// Content sniffing only runs when the extension says nothing.
+	if has_package_tag(contents) {
+		return .UE3_Package, true
+	}
 	if strings.contains(lower, "begin map") {
 		return .Unreal_T3D, true
 	}
@@ -85,6 +97,15 @@ detect_format :: proc(path: string, contents: string) -> (format: ir.Format, by_
 		return .Source_VMF, true
 	}
 	return .Unknown, false
+}
+
+// has_package_tag reports whether the contents start with the UE3 package magic
+// (0x9E2A83C1) in little-endian order.
+has_package_tag :: proc(contents: string) -> bool {
+	if len(contents) < 4 {
+		return false
+	}
+	return contents[0] == 0xC1 && contents[1] == 0x83 && contents[2] == 0x2A && contents[3] == 0x9E
 }
 
 SUPPORTED_FORMATS :: []ir.Format{ir.Format.Source_VMF, ir.Format.Source_BSP, ir.Format.Unreal_T3D}
@@ -110,7 +131,7 @@ engine_of :: proc(f: ir.Format) -> Engine {
 	switch f {
 	case .Source_VMF, .Source_BSP, .Goldsrc_MAP, .Valve_220:
 		return .Source
-	case .Unreal_T3D:
+	case .Unreal_T3D, .UE3_Package:
 		return .Unreal
 	case .Unknown:
 		return .Unknown

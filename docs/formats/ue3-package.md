@@ -1,0 +1,169 @@
+# Unreal Engine 3 package (`.ccmap`)
+
+CrimeCraft ships its maps as cooked Unreal Engine 3 packages with the `.ccmap`
+extension. Internally they are ordinary UE3 packages: a header with a summary,
+three index tables, and per-object payloads addressed from the export table.
+
+`mapconv` reads the first stage — summary, names, imports, exports — in package
+`ue3`. Deserializing object payloads (`Level`, `Model`, `Brush`, `Polys`,
+materials) is the next stage and is not implemented yet.
+
+Everything below was verified against **all 218 `.ccmap` files** in the
+CrimeCraft install; every one of them is identical in the fields marked
+*constant*.
+
+## Constants observed
+
+| Field | Value | Notes |
+| --- | --- | --- |
+| Tag | `0x9E2A83C1` (`PACKAGE_FILE_TAG`) | little-endian `C1 83 2A 9E` |
+| Package version | `576` | engine version, low 16 bits |
+| Licensee version | `5` | high 16 bits: `FileVersion = 0x00050240` |
+| Engine build | `4701` | the `EngineVersion` field, not the package format |
+| Cooked content version | `87` | |
+| Compression flags | `0` | |
+| Compressed chunks | `0` | all 218 map packages store the header and payload uncompressed |
+| Package flags | `0x008A0009` | allow-download, cooked, contains-map, disallow-lazy-loading, require-imports-already-loaded |
+
+The `VER_*` gates that matter for 576 are listed in `ue3.odin`; later versions
+parse the additional fields (623 cross-level GUIDs, 767 texture preallocation)
+but are not exercised by the game data, so they emit `ue3.unverified-version`.
+
+## Summary layout
+
+`FPackageFileSummary` is serialized in the order below (`UnLinker.cpp:377`).
+Offsets are those of `EntryLevel.ccmap` (the largest verified header).
+
+| Offset | Size | Field | Notes |
+| --- | --- | --- | --- |
+| 0x00 | 4 | `Tag` | `0x9E2A83C1` |
+| 0x04 | 4 | `FileVersion` | engine in low 16, licensee in high 16 |
+| 0x08 | 4 | `TotalHeaderSize` | offset of the name table: 175 688 |
+| 0x0C | var | `FolderName` | FString; `"None"` for cooked maps |
+| 0x15 | 4 | `PackageFlags` | `0x008A0009` |
+| 0x19 | 4 | `NameCount` | 1 511 |
+| 0x1D | 4 | `NameOffset` | 134 |
+| 0x21 | 4 | `ExportCount` | 1 711 |
+| 0x25 | 4 | `ExportOffset` | 52 368 |
+| 0x29 | 4 | `ImportCount` | 309 |
+| 0x2D | 4 | `ImportOffset` | 43 716 |
+| 0x31 | 4 | `DependsOffset` | 168 844 |
+| 0x35 | 16 | `Guid` | four little-endian words |
+| 0x45 | 4 | `GenerationCount` | 1 |
+| 0x49 | 12×n | `Generations[]` | `{ExportCount, NameCount, NetObjectCount}` |
+| 0x55 | 4 | `EngineVersion` | 4 701 |
+| 0x59 | 4 | `CookedContentVersion` | 87 |
+| 0x5D | 4 | `CompressionFlags` | 0 |
+| 0x61 | var | `CompressedChunks[]` | `INT` count then 16-byte records |
+| — | 4 | `PackageSource` | |
+| — | var | `AdditionalPackagesToCook[]` | `INT` count then FStrings (`EntryLevel_oceanside`) |
+
+Fields added after version 576 (`ImportExportGuidsOffset`, thumbnail table,
+`TextureAllocations`) are absent here and are skipped by version gate.
+
+The additional-package array is part of the header: in `EntryLevel.ccmap` it
+occupies `0x65..0x85` and the name table starts exactly at `0x86 = 134`.
+
+## Name table
+
+Each entry is:
+
+| Size | Field |
+| --- | --- |
+| 4 | `StringLen` |
+| `StringLen` | ANSI bytes, **including the NUL terminator** |
+| 8 | `Flags` (`EObjectFlags`) |
+
+A negative `StringLen` means UTF-16: the absolute value is the number of code
+units, each 2 bytes, terminator included. The `ue3` reader supports both.
+
+The 8-byte flags field is not obvious: assuming the 32-bit flags of older UE3
+builds misaligns the second name of every package (the first entry still parses
+because its flags happen to be zero). The fork's `EObjectFlags` is `QWORD`
+(`UnName.h:57`), and reading 8 bytes makes the table end **exactly** at
+`NameOffset + table size == ImportOffset` in all 218 packages.
+
+`FName` values inside the tables are 8 bytes: a name index and a number. The
+number disambiguates generated names; `FName::ToString` appends `_<number-1>`
+when it is not zero.
+
+## Import table
+
+Every import is 28 bytes (`UnLinker.cpp`, `FObjectImport`):
+
+| Size | Field |
+| --- | --- |
+| 8 | `ClassPackage` (FName) |
+| 8 | `ClassName` (FName) |
+| 4 | `OuterIndex` (`FPackageIndex`) |
+| 8 | `ObjectName` (FName) |
+
+`309 × 28 = 8 652`, and `43 716 + 8 652 = 52 368`, the export offset.
+
+## Export table
+
+Every export is 68 bytes plus a variable-length array:
+
+| Size | Field |
+| --- | --- |
+| 4 | `ClassIndex` |
+| 4 | `SuperIndex` |
+| 4 | `OuterIndex` |
+| 8 | `ObjectName` (FName) |
+| 4 | `ArchetypeIndex` |
+| 8 | `ObjectFlags` |
+| 4 | `SerialSize` |
+| 4 | `SerialOffset` |
+| — | *(version < 543)* legacy `TMap<FName, INT>` component map |
+| 4 | `ExportFlags` |
+| var | `GenerationNetObjectCount[]`: `INT` count + `INT` values |
+| 16 | `PackageGuid` |
+| 4 | `PackageFlags` |
+
+`1 711 × 68 = 116 348`; the package stores 128 extra bytes of net-object counts,
+so the table ends at `52 368 + 116 476 = 168 844 = DependsOffset`.
+
+### `FPackageIndex`
+
+Table references use the UE3 convention:
+
+- `0` — null,
+- `> 0` — export index `value - 1`,
+- `< 0` — import index `-value - 1`.
+
+Example from `EntryLevel.ccmap`: export 0 has `ClassIndex = -15`, i.e. import
+`14`, whose `ObjectName` is `AmbientSound`. Import 0 has `OuterIndex = -207`,
+i.e. import `206`, the `Engine` package.
+
+## Verification
+
+The reader self-checks the layout on every file:
+
+- the name table must end exactly at `ImportOffset`,
+- the import table must end exactly at `ExportOffset`,
+- the export table must end exactly at `DependsOffset`.
+
+A mismatch is reported as `ue3.table-mismatch` with the byte difference. All
+218 packages pass with zero diagnostics; `mapconv validate` on the maps listed
+in `docs/testing.md` returns `ok: no diagnostics`.
+
+## What is not implemented yet
+
+- **Object payloads.** `SerialOffset`/`SerialSize` point at the per-object data
+  (property tags, `Level`, `Model`, `Brush`, `Polys`, materials). Reading those
+  is the next stage and the prerequisite for producing IR.
+- **Compressed chunks.** None of the map packages use them. The summary fields
+  and the three codecs (`COMPRESS_ZLIB 1`, `COMPRESS_LZO 2`, `COMPRESS_LZX 4`)
+  are surfaced, but payload decompression is not implemented.
+- **Versions above 576.** The conditional fields are parsed, but only 576/5 has
+  game data behind it.
+
+## References
+
+- `Development/Src/Core/Src/UnLinker.cpp` — `FPackageFileSummary` operator,
+  `FObjectImport`, `FObjectExport`, `FCompressedChunk`, `FGenerationInfo`.
+- `Development/Src/Core/Src/UnName.cpp:983` — `FNameEntry` serialization.
+- `Development/Src/Core/Inc/UnObjVer.h` — version gates.
+- `Development/Src/Core/Inc/UnObjBas.h` — `EPackageFlags`.
+- Package `ue3` in this repository; tests in `ue3/ue3_test.odin` build a
+  synthetic 576/5 package byte by byte.

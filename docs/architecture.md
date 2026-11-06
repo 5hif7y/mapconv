@@ -22,10 +22,11 @@ format can convert to every other one through the same code path.
 | `vmf` | Valve Map Format importer, exporter | know about Unreal types |
 | `bsp` | Source 1 BSP reader and world reconstruction (import only) | serialise BSP (there is no compiler here) |
 | `t3d` | T3D parser, importer, exporter | know about VMF or Source semantics |
+| `ue3` | UE3 cooked package reader: summary and name/import/export tables (`.ccmap`) | know about the IR, Source semantics or CSG |
 | `convert` | orchestration, validation, fidelity reporting, inspection | embed format syntax |
 | `main` | CLI, exit codes, report writing | contain conversion logic |
 
-The dependency graph is acyclic: `geom <- ir <- xform`, `vmf`/`bsp`/`t3d` depend
+The dependency graph is acyclic: `geom <- ir <- xform`, `vmf`/`bsp`/`t3d`/`ue3` depend
 on `geom`, `ir`, `diag` (and `xform` for their declared frames), `kv` is shared by
 `vmf` and `bsp`, `convert` depends on the adapters, `main` depends on `convert`.
 

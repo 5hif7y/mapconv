@@ -108,6 +108,18 @@ entity id, `world.solid[3].side[2]`) and a source location for parsed text.
 | `bsp.side-texture-approximated` | a reconstructed side had several textures; the largest face's material was kept |
 | `bsp.displacements` | displacement surfaces present; base surfaces exported |
 
+### `ue3.*`
+
+| Code | Meaning |
+| --- | --- |
+| `ue3.bad-tag`, `ue3.truncated` | not a UE3 package, or it ends before a field the summary needs |
+| `ue3.byte-swapped` | big-endian package; only little-endian is supported |
+| `ue3.unverified-version` | package version other than the verified 576/5; parsed with the 576 layout |
+| `ue3.bad-name-table`, `ue3.bad-import-table`, `ue3.bad-export-table` | implausible entry count in the summary |
+| `ue3.table-mismatch` | a table does not end where the next one starts; the layout is suspect |
+| `ue3.compression-present` | compressed chunks declared; the header is readable, payloads are not decompressed |
+| `ue3.convert-unsupported` | `convert` was asked to import a `.ccmap` before the payload stage exists |
+
 ### `convert.*`
 
 | Code | Meaning |
