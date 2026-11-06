@@ -151,3 +151,32 @@ to_dds :: proc(data: []u8, d: ^diag.Diagnostics) -> (out: []u8, format_name: str
 append_u32 :: proc(buf: ^[dynamic]u8, value: u32) {
 	append(buf, u8(value), u8(value >> 8), u8(value >> 16), u8(value >> 24))
 }
+
+// Encode a minimal 7.2 VTF: 80-byte header, no low-res image, mips written
+// smallest first as the format requires. Input mips are largest first and must
+// be complete (DXT1/3/5).
+encode :: proc(width, height: int, format: u32, mips: [][]u8) -> (out: []u8, ok: bool) {
+	if width <= 0 || height <= 0 || len(mips) == 0 {
+		return
+	}
+	buf := make([dynamic]u8, 0, 80 + 64 * 1024)
+	append(&buf, 'V', 'T', 'F', 0)
+	append_u32(&buf, 7)
+	append_u32(&buf, 2)
+	append(&buf, u8(80), 0) // header size
+	append(&buf, u8(width), u8(width >> 8), u8(height), u8(height >> 8))
+	append_u32(&buf, 0) // flags
+	append(&buf, 1, 0, 0, 0) // frames, first frame
+	for _ in 0..<4 { append(&buf, 0) } // padding
+	for _ in 0..<12 { append(&buf, 0) } // reflectivity
+	for _ in 0..<4 { append(&buf, 0) } // padding
+	append_u32(&buf, 0x3f800000) // bump scale 1.0
+	append_u32(&buf, format)
+	append(&buf, u8(len(mips)), 0xff, 0xff, 0xff, 0xff) // mip count, low-res none
+	append(&buf, 0, 0) // low-res size
+	for len(buf) < 80 { append(&buf, 0) }
+	for i := len(mips) - 1; i >= 0; i -= 1 {
+		append(&buf, ..mips[i])
+	}
+	return buf[:], true
+}

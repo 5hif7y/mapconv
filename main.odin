@@ -436,6 +436,29 @@ run_extract :: proc(args: Args, text: string) {
 			os.exit(2)
 		}
 		written += 1
+		// Also write a VTF when the inline mip run is complete, so Source can use
+		// the texture without a second conversion pass.
+		first := 0
+		for first < len(texture.mips) && len(texture.mips[first].data) == 0 { first += 1 }
+		if first < len(texture.mips) {
+			count := 0
+			for mip in texture.mips[first:] { if len(mip.data) == 0 { break }; count += 1 }
+			code: u32 = 0
+			switch texture.format {
+			case "PF_DXT1": code = vtf.IMAGE_FORMAT_DXT1
+			case "PF_DXT3": code = vtf.IMAGE_FORMAT_DXT3
+			case "PF_DXT5": code = vtf.IMAGE_FORMAT_DXT5
+			case "PF_A8R8G8B8": code = vtf.IMAGE_FORMAT_BGRA8888
+			}
+			if code != 0 && count > 0 {
+				run := make([][]u8, count)
+				for m, k in texture.mips[first:first+count] { run[k] = m.data }
+				if encoded, enc_ok := vtf.encode(int(texture.mips[first].width), int(texture.mips[first].height), code, run); enc_ok {
+					vpath := fmt.aprintf("%s/%s.vtf", args.output, name)
+					_ = os.write_entire_file(vpath, encoded)
+				}
+			}
+		}
 	}
 	// Referenced meshes: the map only stores imports; with --content, follow the
 	// import chain to the content package, then write OBJ (every LOD), an SMD and
