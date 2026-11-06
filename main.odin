@@ -5,6 +5,7 @@
 //   mapconv inspect  --input <file>
 //   mapconv validate --input <file>
 //   mapconv extract  --input <file.ccmap> --output <dir>   (DDS + OBJ)
+//   mapconv audit    --input <file>                        byte coverage
 //
 // Exit codes: 0 success, 1 the conversion produced errors, 2 usage or I/O error.
 package main
@@ -27,6 +28,7 @@ Usage:
   mapconv inspect  --input <file> [--from <format>]
   mapconv validate --input <file> [--from <format>]
   mapconv extract  --input <file.ccmap|ccpk> --output <dir>   DDS textures + OBJ meshes
+  mapconv audit    --input <file>                              byte coverage by class
   mapconv --version
 
 Options:
@@ -92,6 +94,8 @@ main :: proc() {
 		run_validate(args, text)
 	case "extract":
 		run_extract(args, text)
+	case "audit":
+		run_audit(args, text)
 	case:
 		fmt.eprintln(USAGE)
 		os.exit(2)
@@ -284,6 +288,20 @@ run_validate :: proc(args: Args, text: string) {
 		os.exit(1)
 	}
 	fmt.printfln("ok: %s", diag.summary(&diagnostics))
+}
+
+// run_audit reports how many bytes of a UE3 package the reader interprets.
+run_audit :: proc(args: Args, text: string) {
+	pkg, diagnostics := ue3.parse(transmute([]u8)text)
+	if diag.has_errors(&diagnostics) {
+		print_diagnostics(&diagnostics, args.quiet, args.report)
+		os.exit(1)
+	}
+	audit, audit_d := ue3.audit_package(&pkg)
+	fmt.print(ue3.audit_text(&audit))
+	print_diagnostics(&diagnostics, args.quiet, args.report)
+	_ = audit_d
+	delete(audit.rows)
 }
 
 // merge_diags appends one diagnostic list to another and frees the source.
