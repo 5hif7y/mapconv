@@ -285,11 +285,47 @@ is empty; otherwise the `UPolys` brushes already carry the geometry and adding
 the BSP would duplicate it (villyard: 22 solid regions, 188 faces, added to 361
 `UPolys` brushes).
 
+## ULevel: actors and level references
+
+`ULevelBase::Serialize` writes, after the shared object prelude:
+
+| Field | Encoding |
+| --- | --- |
+| `Actors` | **TTransArray**: owner reference (4 B), count, package indices (4 B each) |
+| `URL` | five FStrings (`Protocol`, `Host`, `Map`, `Portal`, `Op`), port (i32), valid (i32) |
+
+and `ULevel::Serialize` continues with:
+
+| Field | Encoding |
+| --- | --- |
+| `Model` | object reference |
+| `ModelComponents` | plain `TArray`: count + references (no owner) |
+| `GameSequences` | plain `TArray`: count + references (no owner) |
+
+Missing the `Actors` owner reference (as with `Surfs`) shifts the URL and every
+following field. Verified on four maps: `EntryLevel` 89 actors, `villyard`
+4 604 (3 966 `StaticMeshActor`, 358 `BlockingVolume`, 170 `PointLight`),
+`City_Bau` 1 403, `transient_map` 5 (two real actors and three null slots left
+by editor-only actors removed during cooking). `inspect` prints the class
+histogram.
+
+**Open issue:** an actor's own payload does not start with the tagged-property
+stream the rest of the objects use. Scanning for a valid tag run gives a
+class-dependent prefix before the tags: 4 bytes for assets (the `NetIndex`),
+8 for some components, and 26 or 30 for actors (`BlockingVolume`, `PointLight`,
+`Emitter` at 26; `StaticMeshActor`, `WorldInfo` at 30). The prefix begins with
+the object's class reference, twice. Until that prelude is explained, actor
+properties (Location, Rotation, StaticMesh, materials) cannot be read; the actor
+list and classes are available, the transforms are not.
+
 ## What is not implemented yet
 
 - **Native bodies of other classes.** `ULevel`, `UWorld` and `UModel` start
   with native fields whose layout (BSP nodes/surfs/verts, actor arrays) is not
   implemented yet; only the shared prelude and `UPolys` are read.
+- **Actor properties.** The actor list is parsed, but the per-actor prelude
+  before its tagged properties is unidentified (see above), so transforms,
+  mesh references and material overrides are not read.
 - **BSP solids.** Node polygons are readable, but turning the node tree into
   convex brushes (the way the Source decompiler does) is not implemented; only
   `UPolys` brush volumes are converted today.

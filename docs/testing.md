@@ -32,6 +32,7 @@ failures.
 | UE3 packages | `ue3/ue3_test.odin` — a synthetic 576/5 package assembled byte by byte: summary fields and offsets, name entries with 64-bit flags, UTF-16 name entries, import/export records, `FPackageIndex` resolution, `FName` number suffix, table-bound checks, and rejection of a bad tag or a truncated file |
 | UE3 object payloads | `ue3/object_test.odin` — object prelude with a `BoolProperty` tag and the `"None"` terminator, a `UPolys` with one quad polygon, bounds-limited reads, the size-mismatch and truncation diagnostics, and an end-to-end import of a synthetic cube (six world-space quads, local `Base`) into one IR brush with six faces |
 | UE3 models | `ue3/model_test.odin` — a synthetic `UModel` with one quad node, one surface and four verts: bulk headers, the `TTransArray` owner before the surface count, polygon resolution through `Verts`/`Points`, the size-mismatch warning and a rejected bulk element size |
+| UE3 levels | `ue3/level_test.odin` — a synthetic `ULevel`: the `Actors` owner and references, URL strings/port/validity, model and component references, and actor class resolution |
 | Conversion | `convert/convert_test.odin` — format detection, VMF→T3D (units, mapping, transform note), T3D→VMF (brush actors collapse into the world), geometry round trip, subtractive CSG warning, unmapped class/property reporting, light colour and brightness in both directions, rotation in both directions, `targetname`↔`Tag`, unsupported target, validation |
 
 ## Fixtures

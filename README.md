@@ -67,7 +67,7 @@ brushes, missing materials) without writing anything.
 | Source 1 VMF (`.vmf`, format 100) | yes | yes | solids, sides, planes, texture axes, entity key/values, editor and unknown blocks preserved |
 | Source 1 BSP (`.bsp`, version 20) | yes | no | world brushes reconstructed from the BSP tree, brush entities read from the brush lumps; displacements and baked data reported |
 | Unreal Engine 3 T3D (`.t3d`) | yes | yes | actors, brushes, polygons, surface flags, materials, unknown properties preserved |
-| CrimeCraft cooked packages (`.ccmap`) | brush volumes + BSP solids | no | summary and tables, object prelude, `UPolys` brush polygons and convex solids reconstructed from the level BSP tree converted to world brushes (`convert --to vmf`); actors, static meshes and materials are the next phase |
+| CrimeCraft cooked packages (`.ccmap`) | brush volumes + BSP solids | no | summary and tables, object prelude, `UPolys` brush polygons, convex solids from the level BSP tree, and the level actor list; actor transforms/static meshes and materials are the next phase |
 | GoldSrc `.map`, Valve 220 | no | no | format identifiers reserved; no adapter yet |
 | Source 2, other engines | no | no | separate research |
 
@@ -167,11 +167,14 @@ Implemented:
       resolved through the vertex pool.
 - [x] Convex solid reconstruction from the level BSP tree (`UModel::PointCheck`
       semantics), with VMF faces, materials and texture vectors.
+- [x] `ULevel` actor list: the `Actors` TTransArray, URL, model and component
+      references, with class histograms in `inspect`.
 
 Next, in rough order:
 
-- [ ] `ULevel` actors and static mesh actors: transforms, mesh and material
-      references; then materials and textures.
+- [ ] Actor properties: explain the per-actor prelude (26/30 bytes before the
+      tag stream) and read Location, Rotation, DrawScale, StaticMesh and
+      material overrides; then materials and textures.
 - [ ] Unreal CSG evaluation/reconstruction for subtractive brushes when targeting
       brush-based formats.
 - [ ] GoldSrc `.map` / Valve 220 adapter.

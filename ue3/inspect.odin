@@ -161,6 +161,30 @@ inspect_text :: proc(pkg: ^Package, path: string) -> string {
 		strings.write_byte(&b, '\n')
 	}
 
+	// Level actors: the native body stores the actor references and the URL.
+	level_actors := 0
+	level_label := ""
+	actor_classes := make(map[string]int, 16)
+	defer delete(actor_classes)
+	for e, i in pkg.exports {
+		if export_class_name(pkg, e) != "Level" {
+			continue
+		}
+		lvl, lvl_diags := read_level(pkg, i)
+		defer delete(lvl_diags.items)
+		if diag.has_errors(&lvl_diags) {
+			continue
+		}
+		level_label = name_text(pkg, e.object_name)
+		level_actors += len(lvl.actors)
+		for actor in lvl.actors {
+			class := actor_class_name(pkg, actor)
+			if class != "" {
+				actor_classes[class] += 1
+			}
+		}
+	}
+
 	if models > 0 {
 		fmt.sbprintf(
 			&b,
@@ -176,6 +200,45 @@ inspect_text :: proc(pkg: ^Package, path: string) -> string {
 		}
 		if model_errors > 0 {
 			fmt.sbprintf(&b, ", %d model(s) failed to parse", model_errors)
+		}
+		strings.write_byte(&b, '\n')
+	}
+
+	if level_actors > 0 {
+		fmt.sbprintf(&b, "level:        %s, %d actor(s)", level_label, level_actors)
+		// Print up to six classes, most frequent first.
+		actor_names := make([dynamic]string, 0, len(actor_classes))
+		defer delete(actor_names)
+		for name in actor_classes {
+			append(&actor_names, name)
+		}
+		actor_plain := actor_names[:]
+		sort.sort(sort.slice_interface(&actor_plain))
+		order := make([]string, len(actor_plain))
+		defer delete(order)
+		copy(order, actor_plain)
+		for i in 0..<len(order) {
+			for j in i + 1..<len(order) {
+				if actor_classes[order[j]] > actor_classes[order[i]] {
+					order[i], order[j] = order[j], order[i]
+				}
+			}
+		}
+		actor_shown := 0
+		for name in order {
+			if actor_shown == 6 {
+				break
+			}
+			if actor_shown == 0 {
+				fmt.sbprintf(&b, ": ")
+			} else {
+				fmt.sbprintf(&b, ", ")
+			}
+			fmt.sbprintf(&b, "%s %d", name, actor_classes[name])
+			actor_shown += 1
+		}
+		if len(order) > 6 {
+			fmt.sbprintf(&b, ", +%d more", len(order) - 6)
 		}
 		strings.write_byte(&b, '\n')
 	}

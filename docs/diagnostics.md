@@ -128,6 +128,7 @@ entity id, `world.solid[3].side[2]`) and a source location for parsed text.
 | `ue3.converted` | summary of what was converted (UPolys faces and BSP solid faces); actors and materials are still pending |
 | `ue3.bsp-solids` | convex solid regions reconstructed from a level BSP model |
 | `ue3.bad-model` | a `UModel` field has an implausible size or count |
+| `ue3.bad-level` | a `ULevel` field has an implausible count (actors, components, sequences) |
 | `ue3.model-size-mismatch` | the model parser did not consume the declared `SerialSize`; the layout is suspect |
 
 ### `convert.*`
