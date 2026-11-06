@@ -43,3 +43,22 @@ test_vtf_to_dds :: proc(t: ^testing.T) {
 	testing.expect_value(t, string(dds[0:4]), "DDS ")
 	testing.expect_value(t, string(dds[84:88]), "DXT1")
 }
+
+@(test)
+test_round_trip :: proc(t: ^testing.T) {
+	mip := [8]u8{0, 0xf8, 0, 0, 0x1f, 0, 0, 0}
+	mips := [][]u8{mip[:]}
+	encoded, ok := encode(4, 4, IMAGE_FORMAT_DXT1, mips)
+	testing.expect(t, ok)
+	defer delete(encoded)
+	d := diag.init()
+	defer delete(d.items)
+	dds, format, dds_ok := to_dds(encoded, &d)
+	testing.expect(t, dds_ok)
+	testing.expect_value(t, format, "DXT1")
+	// DDS header is 128 bytes; the payload must match the encoded mip.
+	testing.expect_value(t, len(dds), 128 + 8)
+	for i in 0..<8 {
+		testing.expect_value(t, dds[128 + i], mip[i])
+	}
+}
