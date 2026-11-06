@@ -28,6 +28,9 @@ VER_ADDITIONAL_COOK_PACKAGE_SUMMARY :: 516
 VER_REMOVED_COMPONENT_MAP :: 543
 VER_ASSET_THUMBNAILS_IN_PACKAGES :: 584
 VER_ADDED_CROSSLEVEL_REFERENCES :: 623
+// FPropertyTag conditionals (Core/Inc/UnPropertyTag.h).
+VER_BYTEPROP_SERIALIZE_ENUM :: 633
+VER_PROPERTYTAG_BOOL_OPTIMIZATION :: 673
 VER_TEXTURE_PREALLOCATION :: 767
 
 // Package flags (EPackageFlags). Only the ones worth showing are named.
@@ -187,8 +190,10 @@ Package :: struct {
 // ---------------------------------------------------------------------------
 
 Reader :: struct {
-	data:    []u8,
-	pos:     int,
+	data: []u8,
+	pos:  int,
+	// limit bounds reads to one export payload; 0 means the whole file.
+	limit:   int,
 	failed:  bool,
 	message: string,
 }
@@ -204,11 +209,24 @@ need :: proc(r: ^Reader, n: int) -> bool {
 	if r.failed {
 		return false
 	}
-	if n < 0 || r.pos + n > len(r.data) {
-		reader_fail(r, fmt.aprintf("read of %d bytes at offset %d exceeds the file (%d bytes)", n, r.pos, len(r.data)))
+	end := len(r.data)
+	if r.limit > 0 && r.limit < end {
+		end = r.limit
+	}
+	if n < 0 || r.pos + n > end {
+		reader_fail(r, fmt.aprintf("read of %d bytes at offset %d exceeds the available data (%d bytes)", n, r.pos, end))
 		return false
 	}
 	return true
+}
+
+read_u8 :: proc(r: ^Reader) -> u8 {
+	if !need(r, 1) {
+		return 0
+	}
+	v := r.data[r.pos]
+	r.pos += 1
+	return v
 }
 
 read_u16 :: proc(r: ^Reader) -> u16 {
@@ -235,6 +253,10 @@ read_u32 :: proc(r: ^Reader) -> u32 {
 
 read_i32 :: proc(r: ^Reader) -> i32 {
 	return i32(read_u32(r))
+}
+
+read_f32 :: proc(r: ^Reader) -> f32 {
+	return transmute(f32)read_u32(r)
 }
 
 read_u64 :: proc(r: ^Reader) -> u64 {

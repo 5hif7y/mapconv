@@ -119,6 +119,10 @@ entity id, `world.solid[3].side[2]`) and a source location for parsed text.
 | `ue3.table-mismatch` | a table does not end where the next one starts; the layout is suspect |
 | `ue3.compression-present` | compressed chunks declared; the header is readable, payloads are not decompressed |
 | `ue3.convert-unsupported` | `convert` was asked to import a `.ccmap` before the payload stage exists |
+| `ue3.export-out-of-range` | an export's serial range lies outside the file |
+| `ue3.tags-overrun`, `ue3.bad-property-size` | the property tag stream or one of its values does not fit the export |
+| `ue3.bad-polys`, `ue3.bad-poly` | implausible `UPolys`/`FPoly` counts |
+| `ue3.polys-size-mismatch` | the polygons do not consume the declared `SerialSize`; the layout is suspect |
 
 ### `convert.*`
 

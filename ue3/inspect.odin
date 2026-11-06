@@ -4,6 +4,7 @@ package ue3
 import "core:fmt"
 import "core:sort"
 import "core:strings"
+import "../diag"
 
 // inspect_text summarizes a parsed package: enough to tell whether the file was
 // read correctly and what the object graph will look like in the next stage.
@@ -83,6 +84,27 @@ inspect_text :: proc(pkg: ^Package, path: string) -> string {
 	plain := classes[:]
 	sort.sort(sort.slice_interface(&plain))
 
+	// Brush volumes carry their authoring geometry as UPolys objects: parse them
+	// all so the summary states how much brush data the package actually holds.
+	polys_objects := 0
+	polygons := 0
+	vertices := 0
+	polys_errors := 0
+	for e, i in pkg.exports {
+		if export_class_name(pkg, e) != "Polys" {
+			continue
+		}
+		polys_objects += 1
+		set, set_diags := read_polys(pkg, i)
+		defer delete(set_diags.items)
+		if diag.has_errors(&set_diags) {
+			polys_errors += 1
+			continue
+		}
+		polygons += len(set.polygons)
+		vertices += set.vertices
+	}
+
 	fmt.sbprintf(&b, "top-level:    %d object(s) with no outer, %d distinct class(es)\n", top_level, len(class_counts))
 	shown := 0
 	for name in plain {
@@ -92,6 +114,20 @@ inspect_text :: proc(pkg: ^Package, path: string) -> string {
 		}
 		fmt.sbprintf(&b, "  %-40s %d\n", name, class_counts[name])
 		shown += 1
+	}
+
+	if polys_objects > 0 {
+		fmt.sbprintf(
+			&b,
+			"brush polys:  %d UPolys object(s), %d polygon(s), %d vertex/vertices",
+			polys_objects,
+			polygons,
+			vertices,
+		)
+		if polys_errors > 0 {
+			fmt.sbprintf(&b, ", %d object(s) failed to parse", polys_errors)
+		}
+		strings.write_byte(&b, '\n')
 	}
 
 	return strings.to_string(b)

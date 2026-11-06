@@ -30,6 +30,7 @@ failures.
 | T3D | `t3d/t3d_test.odin` — tokenizer quoting, vector/rotation parsing, nesting, fixture import (6 polygons, flags, rotation), export/import round trip, malformed blocks, missing map, polygon-list fragment |
 | BSP | `bsp/bsp_test.odin` — a synthetic Source BSP 20 with an entity brush: lump parsing, texture names, brush sides, leaf/brush ownership, model 1, and rejection of a file without the VBSP signature |
 | UE3 packages | `ue3/ue3_test.odin` — a synthetic 576/5 package assembled byte by byte: summary fields and offsets, name entries with 64-bit flags, UTF-16 name entries, import/export records, `FPackageIndex` resolution, `FName` number suffix, table-bound checks, and rejection of a bad tag or a truncated file |
+| UE3 object payloads | `ue3/object_test.odin` — object prelude with a `BoolProperty` tag and the `"None"` terminator, a `UPolys` with one quad polygon, bounds-limited reads, and the size-mismatch and truncation diagnostics |
 | Conversion | `convert/convert_test.odin` — format detection, VMF→T3D (units, mapping, transform note), T3D→VMF (brush actors collapse into the world), geometry round trip, subtractive CSG warning, unmapped class/property reporting, light colour and brightness in both directions, rotation in both directions, `targetname`↔`Tag`, unsupported target, validation |
 
 ## Fixtures

@@ -67,7 +67,7 @@ brushes, missing materials) without writing anything.
 | Source 1 VMF (`.vmf`, format 100) | yes | yes | solids, sides, planes, texture axes, entity key/values, editor and unknown blocks preserved |
 | Source 1 BSP (`.bsp`, version 20) | yes | no | world brushes reconstructed from the BSP tree, brush entities read from the brush lumps; displacements and baked data reported |
 | Unreal Engine 3 T3D (`.t3d`) | yes | yes | actors, brushes, polygons, surface flags, materials, unknown properties preserved |
-| CrimeCraft cooked packages (`.ccmap`) | tables | no | summary, name, import and export tables (`inspect`/`validate`); object payloads and IR import are the next phase |
+| CrimeCraft cooked packages (`.ccmap`) | tables + brush polys | no | summary, name, import and export tables, object prelude and `UPolys` brush polygons (`inspect`/`validate`); other native class bodies and IR import are the next phase |
 | GoldSrc `.map`, Valve 220 | no | no | format identifiers reserved; no adapter yet |
 | Source 2, other engines | no | no | separate research |
 
@@ -157,12 +157,14 @@ Implemented:
       reconstructed from the BSP tree.
 - [x] UE3 cooked package tables (`.ccmap`): summary, names, imports and exports,
       verified against all 218 CrimeCraft map packages.
+- [x] UE3 object prelude (net index, tagged properties) and `UPolys` brush
+      polygons, verified against real brush volumes.
 
 Next, in rough order:
 
-- [ ] Unreal Engine 3 object payloads (`.ccmap`): property tags and the
-      `Level`/`Model`/`Brush`/`Polys` object graph, with compressed chunks
-      (ZLIB/LZO/LZX) if a package uses them.
+- [ ] UE3 native class bodies: `ULevel` (actor/model references) and `UModel`
+      (BSP nodes, surfs, verts), then convert brush polygons and level geometry
+      into the IR; compressed chunks (ZLIB/LZO/LZX) if a package uses them.
 - [ ] Unreal CSG evaluation/reconstruction for subtractive brushes when targeting
       brush-based formats.
 - [ ] GoldSrc `.map` / Valve 220 adapter.

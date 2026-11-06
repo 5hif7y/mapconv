@@ -147,11 +147,87 @@ A mismatch is reported as `ue3.table-mismatch` with the byte difference. All
 218 packages pass with zero diagnostics; `mapconv validate` on the maps listed
 in `docs/testing.md` returns `ok: no diagnostics`.
 
+## Object payloads
+
+Every export's `SerialOffset`/`SerialSize` points at a payload with this prelude:
+
+| Size | Field |
+| --- | --- |
+| 4 | `NetIndex` (`INT`) |
+| var | `FPropertyTag` records for properties that differ from the class default |
+| 8 | terminator: a tag whose name resolves to `"None"` with number 0 |
+| var | native class data |
+
+`FPropertyTag` for version 576 (`Core/Inc/UnPropertyTag.h`):
+
+| Size | Field |
+| --- | --- |
+| 8 | `Name` (FName) |
+| 8 | `Type` (FName, e.g. `BoolProperty`) |
+| 4 | `Size` |
+| 4 | `ArrayIndex` |
+| 8 | `StructName` only when `Type == "StructProperty"` |
+| 4 | boolean value only when `Type == "BoolProperty"` (before gate 673) |
+| — | `EnumName` only when `Type == "ByteProperty"` and version ≥ 633 |
+| `Size` | property value |
+
+Two details that cost time to discover:
+
+- The terminator is identified by the **name string** `"None"`, not by name
+  index 0. Cooked packages reorder the name table (`EntryLevel` has `BookMark` at
+  135 and `None` at 936; `transient_map` has `None` at 32), so an index-based
+  check misses it and the tag walk derails.
+- `BoolProperty` carries its value inside the tag and has `Size == 0`; the other
+  types carry `Size` bytes of value afterwards.
+
+### UPolys: brush polygons
+
+Brush volumes (`BlockingVolume` and subclasses) own two objects: a `Model` and a
+`UPolys`. The `UPolys` body is the authoring geometry of the brush:
+
+| Size | Field |
+| --- | --- |
+| 4 | `Num` |
+| 4 | `Max` |
+| 4 | `Owner` (`FPackageIndex`, points back at the `UPolys` export) |
+| var | `Num` × `FPoly` |
+
+`FPoly` for version 576 (`Engine/Src/UnModel.cpp`, `Engine/Inc/UnObj.h`):
+
+| Size | Field |
+| --- | --- |
+| 12 | `Base` (FVector) |
+| 12 | `Normal` |
+| 12 | `TextureU` |
+| 12 | `TextureV` |
+| 4 + 12 × n | `Vertices` (`INT` count + `FVector` each) |
+| 4 | `PolyFlags` |
+| 4 | `Actor` (`FPackageIndex`) |
+| 8 | `ItemName` (FName) |
+| 4 | `Material` (`FPackageIndex`) |
+| 4 | `iLink` |
+| 4 | `iBrushPoly` |
+| 4 | `ShadowMapScale` (float) |
+| 4 | `LightingChannels` |
+
+`LightmassSettings` (version ≥ 600) and the rule-set pointer/variation name
+(≥ 606 / ≥ 670) are absent in 576 and are not read.
+
+Verification: all 368 `UPolys` objects in `EntryLevel`, `villyard`,
+`City05_HQ` and `City_Bau` parse exactly to their declared `SerialSize`
+(`villyard` alone: 3 199 polygons, 14 726 vertices). A size mismatch is
+reported as `ue3.polys-size-mismatch`, which is how a wrong `FPoly` layout
+would surface.
+
+`mapconv inspect` prints the totals ("brush polys: 362 UPolys object(s) …").
+
 ## What is not implemented yet
 
-- **Object payloads.** `SerialOffset`/`SerialSize` point at the per-object data
-  (property tags, `Level`, `Model`, `Brush`, `Polys`, materials). Reading those
-  is the next stage and the prerequisite for producing IR.
+- **Native bodies of other classes.** `ULevel`, `UWorld` and `UModel` start
+  with native fields whose layout (BSP nodes/surfs/verts, actor arrays) is not
+  implemented yet; only the shared prelude and `UPolys` are read.
+- **Converting brush polygons to IR.** The polygons are readable; mapping them
+  to brush faces, CSG semantics and materials is the next stage.
 - **Compressed chunks.** None of the map packages use them. The summary fields
   and the three codecs (`COMPRESS_ZLIB 1`, `COMPRESS_LZO 2`, `COMPRESS_LZX 4`)
   are surfaced, but payload decompression is not implemented.
