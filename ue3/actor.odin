@@ -23,6 +23,11 @@ Actor_Info :: struct {
 	has_component:   bool,
 	// Mesh asset name resolved through the component, when it has one.
 	mesh_name:       string,
+	// Light data, from the component or (as a fallback) the actor itself.
+	brightness:      f32,
+	light_color:     [4]u8, // FColor is stored B, G, R, A
+	has_brightness:  bool,
+	has_light_color: bool,
 }
 
 read_actor_info :: proc(
@@ -72,31 +77,49 @@ read_actor_info :: proc(
 			}
 		}
 	}
-	for name in ([]string{"StaticMesh", "SkeletalMesh", "ParticleSystem"}) {
-		if !info.has_component {
-			break
-		}
-		if package_index_kind(info.component_index) != .Export {
-			break
-		}
+	if info.has_component && package_index_kind(info.component_index) == .Export {
 		component := int(info.component_index) - 1
-		if component < 0 || component >= len(pkg.exports) {
-			break
-		}
-		comp_head, comp_d := read_object_head(pkg, pkg.exports[component], allocator)
-		defer delete(comp_d.items)
-		if diag.has_errors(&comp_d) {
-			break
-		}
-		if tag, ok := find_tag(pkg, comp_head.tags, name); ok {
-			if value, ok2 := tag_i32(pkg, tag); ok2 && value != 0 {
-				info.mesh_name = package_index_name(pkg, value)
+		if component >= 0 && component < len(pkg.exports) {
+			comp_head, comp_d := read_object_head(pkg, pkg.exports[component], allocator)
+			defer delete(comp_d.items)
+			if !diag.has_errors(&comp_d) {
+				for name in ([]string{"StaticMesh", "SkeletalMesh", "ParticleSystem"}) {
+					if tag, ok := find_tag(pkg, comp_head.tags, name); ok {
+						if value, ok2 := tag_i32(pkg, tag); ok2 && value != 0 {
+							info.mesh_name = package_index_name(pkg, value)
+							break
+						}
+					}
+				}
+				read_light_properties(pkg, comp_head.tags[:], &info)
 			}
 		}
-		break
+	}
+	// Some light classes keep the values on the actor itself.
+	if !info.has_brightness || !info.has_light_color {
+		read_light_properties(pkg, head.tags[:], &info)
 	}
 	if !info.has_draw_scale {
 		info.draw_scale = 1
+	}
+	return
+}
+
+// read_light_properties pulls Brightness and LightColor out of a tag list.
+// LightColor is an FColor: four bytes stored B, G, R, A.
+read_light_properties :: proc(pkg: ^Package, tags: []Property_Tag, info: ^Actor_Info) {
+	if tag, ok := find_tag(pkg, tags, "Brightness"); ok {
+		if value, ok2 := tag_f32(pkg, tag); ok2 {
+			info.brightness = value
+			info.has_brightness = true
+		}
+	}
+	if tag, ok := find_tag(pkg, tags, "LightColor"); ok {
+		bytes := tag_bytes(pkg, tag)
+		if len(bytes) >= 4 {
+			info.light_color = [4]u8{bytes[0], bytes[1], bytes[2], bytes[3]}
+			info.has_light_color = true
+		}
 	}
 	return
 }

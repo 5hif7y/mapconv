@@ -63,7 +63,7 @@ build_actor_package :: proc(class_name: string, payload: []u8, flags: u64) -> [d
 	names_buf: [dynamic]u8
 	nb := Builder{buf = names_buf}
 	// 0..5 fixed, then the actor names used by build_actor_payload.
-	for text in ([]string{"None", "Class", "Package", "Engine", class_name, "Actor_0", "Location", "StructProperty", "Vector", "Rotation", "Rotator", "DrawScale", "FloatProperty"}) {
+	for text in ([]string{"None", "Class", "Package", "Engine", class_name, "Actor_0", "Location", "StructProperty", "Vector", "Rotation", "Rotator", "DrawScale", "FloatProperty", "Brightness", "LightColor", "Color"}) {
 		put_name_entry(&nb, text, 0)
 	}
 	names_buf = nb.buf
@@ -109,7 +109,7 @@ build_actor_package :: proc(class_name: string, payload: []u8, flags: u64) -> [d
 	put_i32(&h, i32(header_fixed))
 	put_fstring(&h, "")
 	put_u32(&h, PKG_COOKED)
-	put_i32(&h, 13)
+	put_i32(&h, 16)
 	put_i32(&h, i32(header_fixed))
 	put_i32(&h, 1)
 	put_i32(&h, i32(export_offset))
@@ -119,7 +119,7 @@ build_actor_package :: proc(class_name: string, payload: []u8, flags: u64) -> [d
 	put_guid(&h)
 	put_i32(&h, 1)
 	put_i32(&h, 1)
-	put_i32(&h, 13)
+	put_i32(&h, 16)
 	put_i32(&h, 0)
 	put_i32(&h, 4701)
 	put_i32(&h, 87)
@@ -185,4 +185,51 @@ test_component_template_prefix :: proc(t: ^testing.T) {
 	testing.expect_value(t, head.template_owner_class, i32(7))
 	testing.expect_value(t, head.net_index, i32(0))
 	testing.expect_value(t, len(head.tags), 0)
+}
+
+build_light_actor_payload :: proc() -> [dynamic]u8 {
+	NAME_BRIGHTNESS :: 13
+	NAME_FLOAT :: 12
+	NAME_LIGHTCOLOR :: 14
+	NAME_STRUCT :: 7
+	NAME_COLOR :: 15
+
+	p := Builder{}
+	// State frame without a Node (22 bytes).
+	put_i32(&p, 0)
+	put_i32(&p, 0)
+	put_u64(&p, 0)
+	put_u16(&p, 0)
+	put_i32(&p, 0)
+	put_i32(&p, 1) // NetIndex
+
+	put_tag_header(&p, NAME_BRIGHTNESS, NAME_FLOAT, 4, 0)
+	put_f32(&p, 3.5)
+
+	put_tag_header(&p, NAME_LIGHTCOLOR, NAME_STRUCT, 4, 0)
+	put_name_ref(&p, NAME_COLOR, 0)
+	append(&p.buf, 10, 20, 30, 255) // B, G, R, A
+
+	put_i32(&p, 0) // None
+	put_i32(&p, 0)
+	return p.buf
+}
+
+@(test)
+test_read_light_actor :: proc(t: ^testing.T) {
+	payload := build_light_actor_payload()
+	data := build_actor_package("PointLight", payload[:], RF_HAS_STACK)
+	pkg, d := parse(data[:])
+	defer delete(d.items)
+	testing.expect_value(t, diag.count(&d, .Error), 0)
+
+	info, info_d := read_actor_info(&pkg, 0)
+	defer delete(info_d.items)
+	testing.expect_value(t, diag.count(&info_d, .Error), 0)
+	testing.expect(t, info.has_brightness)
+	testing.expect_value(t, info.brightness, f32(3.5))
+	testing.expect(t, info.has_light_color)
+	testing.expect_value(t, info.light_color[0], u8(10)) // B
+	testing.expect_value(t, info.light_color[2], u8(30)) // R
+	testing.expect_value(t, info.light_color[3], u8(255)) // A
 }

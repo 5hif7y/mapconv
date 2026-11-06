@@ -419,6 +419,13 @@ tag_i32 :: proc(pkg: ^Package, tag: Property_Tag) -> (i32, bool) {
 	return read_i32(&r), !r.failed
 }
 
+tag_bytes :: proc(pkg: ^Package, tag: Property_Tag) -> []u8 {
+	if tag.size <= 0 || tag.value_offset + int(tag.size) > len(pkg.data) {
+		return nil
+	}
+	return pkg.data[tag.value_offset:tag.value_offset + int(tag.size)]
+}
+
 tag_name_ref :: proc(pkg: ^Package, tag: Property_Tag) -> (Name_Ref, bool) {
 	if tag.size < 8 {
 		return {}, false

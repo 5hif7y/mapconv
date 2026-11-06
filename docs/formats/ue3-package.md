@@ -340,8 +340,11 @@ exactly at `SerialOffset + SerialSize` (PlayerStart: net 4 bytes, properties
 With the prelude handled, actor properties are readable: `Location` (Vector,
 12 B), `Rotation` (Rotator, three 32-bit angle units), `DrawScale` (float) and
 the component reference. The component's `StaticMesh`/`SkeletalMesh` property
-resolves the mesh name. `mapconv` turns a `StaticMeshActor` into a `prop_static`
-entity with `origin`, `angles` and `model` (villyard: 3 915 entities).
+resolves the mesh name, and its `Brightness` (float) and `LightColor` (`FColor`,
+four bytes stored B, G, R, A) feed lights. `mapconv` turns a `StaticMeshActor`
+into a `prop_static` entity with `origin`, `angles` and `model` (villyard:
+3 915), and light actors into `light`/`light_spot`/`light_environment` with
+`_light` built from colour and brightness (EntryLevel: 16 lights).
 
 ## Texture2D: mip data and DDS export
 

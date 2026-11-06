@@ -114,6 +114,7 @@ import_document :: proc(data: []u8, source_path: string) -> (doc: ir.Document, d
 	// StaticMeshActor into prop_static for Source targets.
 	actors_total := 0
 	mesh_entities := 0
+	light_entities := 0
 	for e, i in pkg.exports {
 		if export_class_name(&pkg, e) != "Level" {
 			continue
@@ -135,22 +136,28 @@ import_document :: proc(data: []u8, source_path: string) -> (doc: ir.Document, d
 			}
 			actors_total += 1
 			if info.mesh_name == "" {
+				// Lights carry their colour and brightness instead of a mesh.
+				if info.has_brightness || info.has_light_color {
+					light := ir.make_entity("", info.class_name)
+					set_actor_transform(&light, info)
+					if info.has_brightness {
+						ir.push_property(&light.props, "brightness", fmt.aprintf("%g", info.brightness))
+					}
+					if info.has_light_color {
+						c := info.light_color
+						ir.push_property(
+							&light.props,
+							"lightcolor",
+							fmt.aprintf("(R=%d,G=%d,B=%d,A=%d)", int(c[2]), int(c[1]), int(c[0]), int(c[3])),
+						)
+					}
+					append(&doc.entities, light)
+					light_entities += 1
+				}
 				continue
 			}
 			entity := ir.make_entity("", info.class_name)
-			entity.origin = geom.Vec3 {
-				f64(info.location[0]),
-				f64(info.location[1]),
-				f64(info.location[2]),
-			}
-			if info.has_rotation {
-				entity.rotation = ir.Rotation {
-					pitch = info.rotation[0],
-					yaw   = info.rotation[1],
-					roll  = info.rotation[2],
-				}
-				entity.has_rotation = true
-			}
+			set_actor_transform(&entity, info)
 			ir.push_property(&entity.props, "staticmesh", info.mesh_name)
 			append(&doc.entities, entity)
 			mesh_entities += 1
@@ -161,8 +168,9 @@ import_document :: proc(data: []u8, source_path: string) -> (doc: ir.Document, d
 			&d,
 			"ue3.actors",
 			fmt.aprintf(
-				"created %d entity(ies) from %d actor(s); actors without a readable mesh are skipped",
+				"created %d mesh and %d light entity(ies) from %d actor(s); other actors are skipped",
 				mesh_entities,
+				light_entities,
 				actors_total,
 			),
 			source_path,
@@ -201,6 +209,9 @@ import_document :: proc(data: []u8, source_path: string) -> (doc: ir.Document, d
 	if mesh_entities > 0 {
 		summary = fmt.aprintf("%s, %d mesh entity(ies)", summary, mesh_entities)
 	}
+	if light_entities > 0 {
+		summary = fmt.aprintf("%s, %d light entity(ies)", summary, light_entities)
+	}
 	diag.info(
 		&d,
 		"ue3.converted",
@@ -216,6 +227,23 @@ import_document :: proc(data: []u8, source_path: string) -> (doc: ir.Document, d
 		)
 	}
 	return
+}
+
+// set_actor_transform copies the UE3 location and rotation into an entity.
+set_actor_transform :: proc(entity: ^ir.Entity, info: Actor_Info) {
+	entity.origin = geom.Vec3 {
+		f64(info.location[0]),
+		f64(info.location[1]),
+		f64(info.location[2]),
+	}
+	if info.has_rotation {
+		entity.rotation = ir.Rotation {
+			pitch = info.rotation[0],
+			yaw   = info.rotation[1],
+			roll  = info.rotation[2],
+		}
+		entity.has_rotation = true
+	}
 }
 
 // outer_is_level reports whether the export's outer is a Level export.

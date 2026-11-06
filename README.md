@@ -68,7 +68,7 @@ brushes, missing materials) without writing anything.
 | Source 1 VMF (`.vmf`, format 100) | yes | yes | solids, sides, planes, texture axes, entity key/values, editor and unknown blocks preserved |
 | Source 1 BSP (`.bsp`, version 20) | yes | no | world brushes reconstructed from the BSP tree, brush entities read from the brush lumps; displacements and baked data reported |
 | Unreal Engine 3 T3D (`.t3d`) | yes | yes | actors, brushes, polygons, surface flags, materials, unknown properties preserved |
-| CrimeCraft cooked packages (`.ccmap`) | brush volumes + BSP solids + actors | no | summary and tables, `UPolys` brush polygons, convex BSP solids, and actors as entities (`StaticMeshActor` -> `prop_static` with origin, angles and mesh name); mesh/material assets are not converted |
+| CrimeCraft cooked packages (`.ccmap`) | brush volumes + BSP solids + actors | no | summary and tables, `UPolys` brush polygons, convex BSP solids, actors as entities (`StaticMeshActor` -> `prop_static`, lights -> `light` with `_light`), and `extract` writes inline texture mips as DDS; mesh/material assets are not converted |
 | GoldSrc `.map`, Valve 220 | no | no | format identifiers reserved; no adapter yet |
 | Source 2, other engines | no | no | separate research |
 
@@ -177,6 +177,9 @@ Implemented:
       reference become `prop_static` entities (`villyard`: 3 915).
 - [x] Texture extraction: `Texture2D` mips to DDS (DXT1/3/5, BGRA8, G8, A8),
       with streamed mips reported (EntryLevel: 29 inline of 90).
+- [x] Light actors: Brightness and LightColor from the light component become
+      Source `light`/`light_spot`/`light_environment` entities with `_light`
+      (villyard: 169 lights, EntryLevel: 16).
 
 Next, in rough order:
 
