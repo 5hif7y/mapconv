@@ -501,5 +501,6 @@ static_mesh_qc :: proc(model_name, smd_name, materials_dir: string) -> string {
 	fmt.sbprintf(&b, "$body \"body\" \"%s\"\n", smd_name)
 	fmt.sbprintf(&b, "$cdmaterials \"%s\"\n", materials_dir)
 	strings.write_string(&b, "$surfaceprop \"default\"\n$staticprop\n")
+	fmt.sbprintf(&b, "$sequence \"idle\" \"%s\" fps 30\n", smd_name)
 	return strings.to_string(b)
 }
