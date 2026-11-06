@@ -67,7 +67,7 @@ brushes, missing materials) without writing anything.
 | Source 1 VMF (`.vmf`, format 100) | yes | yes | solids, sides, planes, texture axes, entity key/values, editor and unknown blocks preserved |
 | Source 1 BSP (`.bsp`, version 20) | yes | no | world brushes reconstructed from the BSP tree, brush entities read from the brush lumps; displacements and baked data reported |
 | Unreal Engine 3 T3D (`.t3d`) | yes | yes | actors, brushes, polygons, surface flags, materials, unknown properties preserved |
-| CrimeCraft cooked packages (`.ccmap`) | brush volumes + BSP solids | no | summary and tables, object prelude, `UPolys` brush polygons, convex solids from the level BSP tree, and the level actor list; actor transforms/static meshes and materials are the next phase |
+| CrimeCraft cooked packages (`.ccmap`) | brush volumes + BSP solids + actors | no | summary and tables, `UPolys` brush polygons, convex BSP solids, and actors as entities (`StaticMeshActor` -> `prop_static` with origin, angles and mesh name); mesh/material assets are not converted |
 | GoldSrc `.map`, Valve 220 | no | no | format identifiers reserved; no adapter yet |
 | Source 2, other engines | no | no | separate research |
 
@@ -169,12 +169,14 @@ Implemented:
       semantics), with VMF faces, materials and texture vectors.
 - [x] `ULevel` actor list: the `Actors` TTransArray, URL, model and component
       references, with class histograms in `inspect`.
+- [x] Actor payloads: the `RF_HasStack` state-frame prelude, then `NetIndex` and
+      tagged properties; Location, Rotation, DrawScale and the component's mesh
+      reference become `prop_static` entities (`villyard`: 3 915).
 
 Next, in rough order:
 
-- [ ] Actor properties: explain the per-actor prelude (26/30 bytes before the
-      tag stream) and read Location, Rotation, DrawScale, StaticMesh and
-      material overrides; then materials and textures.
+- [ ] Mesh and material assets: convert `StaticMesh` geometry and UE3 materials
+      to Source models/materials, and pack the textures.
 - [ ] Unreal CSG evaluation/reconstruction for subtractive brushes when targeting
       brush-based formats.
 - [ ] GoldSrc `.map` / Valve 220 adapter.

@@ -129,6 +129,8 @@ entity id, `world.solid[3].side[2]`) and a source location for parsed text.
 | `ue3.bsp-solids` | convex solid regions reconstructed from a level BSP model |
 | `ue3.bad-model` | a `UModel` field has an implausible size or count |
 | `ue3.bad-level` | a `ULevel` field has an implausible count (actors, components, sequences) |
+| `ue3.bad-state-frame` | an actor's execution-stack prelude has an implausible count |
+| `ue3.actors` | summary of the mesh entities created from actors |
 | `ue3.model-size-mismatch` | the model parser did not consume the declared `SerialSize`; the layout is suspect |
 
 ### `convert.*`

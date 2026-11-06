@@ -242,10 +242,22 @@ convert_bytes :: proc(data: []u8, source_path: string, opts: Options) -> Result 
 		apply_transform(&res.doc, transform, target_cs, &res.diagnostics)
 	}
 
-	// 3. Entity mapping through the profile.
-	prof, found := profile.by_name(opts.profile_name)
+	// 3. Entity mapping through the profile. With no explicit profile, pick the
+	// direction that matches the engines so cross-engine conversions map by
+	// default.
+	profile_name := opts.profile_name
+	if profile_name == "" {
+		source_engine := engine_of(res.source_format)
+		target_engine := engine_of(res.target_format)
+		if source_engine == .Unreal && target_engine == .Source {
+			profile_name = "unreal3-to-source1"
+		} else if source_engine == .Source && target_engine == .Unreal {
+			profile_name = "source1-to-unreal3"
+		}
+	}
+	prof, found := profile.by_name(profile_name)
 	if !found {
-		diag.warn(&res.diagnostics, "convert.unknown-profile", ir.concat("unknown profile '", opts.profile_name, "'; no entity mapping applied"), source_path)
+		diag.warn(&res.diagnostics, "convert.unknown-profile", ir.concat("unknown profile '", profile_name, "'; no entity mapping applied"), source_path)
 	}
 	if engine_of(res.source_format) != engine_of(res.target_format) {
 		map_entities(&res.doc, prof, &res.diagnostics)

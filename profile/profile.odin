@@ -123,7 +123,7 @@ UNREAL_TO_SOURCE_PROPERTIES :: []Property_Rule {
 	{"lightcolor", .Unreal_Light, "", "colour mapped exactly"},
 	{"rotation", .Unreal_Rotation, "", "Unreal rotator converted to Source angles"},
 	{"tag", .Copy, "targetname", "the name is preserved; no I/O relationship is created"},
-	{"staticmesh", .Asset_Reference, "", "the static mesh asset is not converted"},
+	{"staticmesh", .Copy, "model", "the static mesh asset is not converted; the path is kept"},
 	{"drawscale", .Drop, "", "Unreal draw scale has no Source VMF equivalent"},
 	{"drawscale3d", .Drop, "", "Unreal draw scale has no Source VMF equivalent"},
 	{"prepivot", .Drop, "", "pre-pivot is folded into the actor origin"},

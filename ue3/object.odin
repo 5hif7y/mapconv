@@ -19,6 +19,7 @@
 package ue3
 
 import "core:fmt"
+import "core:strings"
 import "../diag"
 
 // Property_Tag mirrors FPropertyTag (Core/Inc/UnPropertyTag.h) for version 576.
@@ -37,14 +38,44 @@ Property_Tag :: struct {
 	value_offset: int,
 }
 
+// State_Frame mirrors the mutable part of FStateFrame (UnStack.h) as serialized
+// by UObject::Serialize when the object has RF_HasStack. It comes *before* the
+// NetIndex, which is why actor payloads start with data that is not a tag.
+State_Frame :: struct {
+	node:              i32,
+	state_node:        i32,
+	probe_mask:        u64,
+	latent_action:     u16,
+	state_stack_count: i32,
+	offset:            i32,
+}
+
+RF_HAS_STACK :: 0x0200000000000000
+RF_CLASS_DEFAULT_OBJECT :: 0x0000000000000200
+
 // Object_Head is the shared prelude of an export payload.
 Object_Head :: struct {
-	net_index:   i32,
-	tags:        []Property_Tag,
+	// Present when the export has RF_HasStack (actors and script objects).
+	state_frame:    State_Frame,
+	has_state_frame: bool,
+	// UComponent::PreSerialize writes the template owner class before everything
+	// else; only components have it.
+	template_owner_class: i32,
+	has_template_owner:   bool,
+	net_index:      i32,
+	tags:           []Property_Tag,
 	// Absolute file offset of the native class data (after the "None" tag).
-	body_offset: int,
+	body_offset:    int,
 	// Absolute end of this export's payload (SerialOffset + SerialSize).
-	end_offset:  int,
+	end_offset:     int,
+}
+
+// is_component_class reports whether an export is a UComponent, which writes a
+// template reference before the object prelude. The class hierarchy lives in the
+// imported script packages, so this uses the engine's naming convention.
+is_component_class :: proc(pkg: ^Package, e: Export) -> bool {
+	class := export_class_name(pkg, e)
+	return strings.has_suffix(class, "Component")
 }
 
 is_none_name :: proc(pkg: ^Package, ref: Name_Ref) -> bool {
@@ -69,6 +100,55 @@ read_object_head :: proc(
 	}
 	head.end_offset = int(e.serial_offset) + int(e.serial_size)
 	r := Reader{data = pkg.data, pos = int(e.serial_offset), limit = head.end_offset}
+	version := engine_version(&pkg.summary)
+
+	// Execution stack: UObject::Serialize writes it before the NetIndex when the
+	// object has RF_HasStack (every actor does).
+	if e.object_flags & RF_HAS_STACK != 0 {
+		sf: State_Frame
+		sf.node = read_i32(&r)
+		sf.state_node = read_i32(&r)
+		sf.probe_mask = read_u64(&r)
+		if version < VER_REDUCED_STATEFRAME_LATENTACTION_SIZE {
+			sf.latent_action = u16(read_i32(&r))
+		} else {
+			sf.latent_action = read_u16(&r)
+		}
+		sf.state_stack_count = read_i32(&r)
+		if r.failed || sf.state_stack_count < 0 || sf.state_stack_count > 10_000 {
+			diag.err(&d, "ue3.bad-state-frame", fmt.aprintf("implausible state stack count %d", sf.state_stack_count))
+			return
+		}
+		// FPushedState: State (4) + Node (4) + Offset (4).
+		if !need(&r, int(sf.state_stack_count) * 12) {
+			diag.err(&d, "ue3.truncated", r.message)
+			return
+		}
+		r.pos += int(sf.state_stack_count) * 12
+		if sf.node != 0 {
+			sf.offset = read_i32(&r)
+		}
+		if r.failed {
+			diag.err(&d, "ue3.truncated", r.message)
+			return
+		}
+		head.state_frame = sf
+		head.has_state_frame = true
+	}
+
+	// Components serialize their template owner class before the object prelude.
+	if is_component_class(pkg, e) {
+		head.template_owner_class = read_i32(&r)
+		head.has_template_owner = true
+		if e.object_flags & RF_CLASS_DEFAULT_OBJECT != 0 {
+			_ = read_name_ref(&r) // TemplateName
+		}
+		if r.failed {
+			diag.err(&d, "ue3.truncated", r.message)
+			return
+		}
+	}
+
 	head.net_index = read_i32(&r)
 	if r.failed {
 		diag.err(&d, "ue3.truncated", r.message)
@@ -76,7 +156,6 @@ read_object_head :: proc(
 	}
 
 	tags := make([dynamic]Property_Tag, 0, 4, allocator)
-	version := engine_version(&pkg.summary)
 	for {
 		if r.pos + 8 > head.end_offset {
 			diag.err(
@@ -277,4 +356,73 @@ read_polys :: proc(
 
 read_vec3 :: proc(r: ^Reader) -> Vec3 {
 	return Vec3{read_f32(r), read_f32(r), read_f32(r)}
+}
+
+// ---------------------------------------------------------------------------
+// Property values
+// ---------------------------------------------------------------------------
+
+// tag_name is the property name of a tag.
+tag_name :: proc(pkg: ^Package, tag: Property_Tag) -> string {
+	return name_text(pkg, tag.name)
+}
+
+// find_tag looks a property up by name. The tag list is small.
+find_tag :: proc(pkg: ^Package, tags: []Property_Tag, name: string) -> (Property_Tag, bool) {
+	for tag in tags {
+		if tag_name(pkg, tag) == name {
+			return tag, true
+		}
+	}
+	return {}, false
+}
+
+tag_reader :: proc(pkg: ^Package, tag: Property_Tag) -> Reader {
+	return Reader {
+		data = pkg.data,
+		pos = tag.value_offset,
+		limit = tag.value_offset + int(tag.size),
+	}
+}
+
+tag_vec3 :: proc(pkg: ^Package, tag: Property_Tag) -> ([3]f32, bool) {
+	if tag.size < 12 {
+		return {}, false
+	}
+	r := tag_reader(pkg, tag)
+	v := [3]f32{read_f32(&r), read_f32(&r), read_f32(&r)}
+	return v, !r.failed
+}
+
+tag_rotator :: proc(pkg: ^Package, tag: Property_Tag) -> ([3]i32, bool) {
+	if tag.size < 12 {
+		return {}, false
+	}
+	r := tag_reader(pkg, tag)
+	v := [3]i32{read_i32(&r), read_i32(&r), read_i32(&r)}
+	return v, !r.failed
+}
+
+tag_f32 :: proc(pkg: ^Package, tag: Property_Tag) -> (f32, bool) {
+	if tag.size < 4 {
+		return 0, false
+	}
+	r := tag_reader(pkg, tag)
+	return read_f32(&r), !r.failed
+}
+
+tag_i32 :: proc(pkg: ^Package, tag: Property_Tag) -> (i32, bool) {
+	if tag.size < 4 {
+		return 0, false
+	}
+	r := tag_reader(pkg, tag)
+	return read_i32(&r), !r.failed
+}
+
+tag_name_ref :: proc(pkg: ^Package, tag: Property_Tag) -> (Name_Ref, bool) {
+	if tag.size < 8 {
+		return {}, false
+	}
+	r := tag_reader(pkg, tag)
+	return read_name_ref(&r), !r.failed
 }

@@ -31,6 +31,8 @@ VER_ADDED_CROSSLEVEL_REFERENCES :: 623
 // FPropertyTag conditionals (Core/Inc/UnPropertyTag.h).
 VER_BYTEPROP_SERIALIZE_ENUM :: 633
 VER_PROPERTYTAG_BOOL_OPTIMIZATION :: 673
+// FStateFrame prelude (UObject::Serialize before SerializeNetIndex).
+VER_REDUCED_STATEFRAME_LATENTACTION_SIZE :: 566
 VER_TEXTURE_PREALLOCATION :: 767
 
 // Package flags (EPackageFlags). Only the ones worth showing are named.

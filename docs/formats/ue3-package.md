@@ -309,23 +309,48 @@ following field. Verified on four maps: `EntryLevel` 89 actors, `villyard`
 by editor-only actors removed during cooking). `inspect` prints the class
 histogram.
 
-**Open issue:** an actor's own payload does not start with the tagged-property
-stream the rest of the objects use. Scanning for a valid tag run gives a
-class-dependent prefix before the tags: 4 bytes for assets (the `NetIndex`),
-8 for some components, and 26 or 30 for actors (`BlockingVolume`, `PointLight`,
-`Emitter` at 26; `StaticMeshActor`, `WorldInfo` at 30). The prefix begins with
-the object's class reference, twice. Until that prelude is explained, actor
-properties (Location, Rotation, StaticMesh, materials) cannot be read; the actor
-list and classes are available, the transforms are not.
+### Actor payload prelude: the state frame
+
+An actor's payload does **not** start with the tagged properties. `UObject::Serialize`
+writes the execution stack first when the object has `RF_HasStack` (every actor
+does), and only then the `NetIndex` and the tags. That is the class-dependent
+prefix seen before the tag stream: 26 bytes for an actor with a script state
+(`PointLight`, `StaticMeshActor`), 22 for one without (`BlockingVolume`), plus
+4 for the `NetIndex`. Assets without a stack start at the `NetIndex` (4 bytes),
+and components write `UComponent::PreSerialize`'s template owner class (4 bytes,
+plus an `FName` for template objects) before everything else.
+
+`FStateFrame` for version 576:
+
+| Size | Field |
+| --- | --- |
+| 4 | `Node` (object reference) |
+| 4 | `StateNode` (object reference) |
+| 8 | `ProbeMask` (QWORD; before gate 691) |
+| 2 | `LatentAction` (WORD from gate 566; `INT` before) |
+| 4 + 12 × n | `StateStack`: count, then `FPushedState` = `State` (4) + `Node` (4) + `Offset` (4) |
+| 4 | `Code` offset into `Node`'s script, only when `Node` is not null |
+
+Confirmed with engine probes on `transient_map`: `ULinkerLoad::Preload` reports
+`Tell() == SerialOffset` for every export; inside `UObject::Serialize` the
+`NetIndex` starts 26 bytes later for `PlayerStart`/`WorldInfo` and the tags end
+exactly at `SerialOffset + SerialSize` (PlayerStart: net 4 bytes, properties
+300 bytes, total 330).
+
+With the prelude handled, actor properties are readable: `Location` (Vector,
+12 B), `Rotation` (Rotator, three 32-bit angle units), `DrawScale` (float) and
+the component reference. The component's `StaticMesh`/`SkeletalMesh` property
+resolves the mesh name. `mapconv` turns a `StaticMeshActor` into a `prop_static`
+entity with `origin`, `angles` and `model` (villyard: 3 915 entities).
 
 ## What is not implemented yet
 
 - **Native bodies of other classes.** `ULevel`, `UWorld` and `UModel` start
   with native fields whose layout (BSP nodes/surfs/verts, actor arrays) is not
   implemented yet; only the shared prelude and `UPolys` are read.
-- **Actor properties.** The actor list is parsed, but the per-actor prelude
-  before its tagged properties is unidentified (see above), so transforms,
-  mesh references and material overrides are not read.
+- **Mesh assets and materials.** Actor transforms and mesh *references* are
+  read, but the mesh and texture assets themselves are not converted; the VMF
+  keeps the Unreal asset names.
 - **BSP solids.** Node polygons are readable, but turning the node tree into
   convex brushes (the way the Source decompiler does) is not implemented; only
   `UPolys` brush volumes are converted today.

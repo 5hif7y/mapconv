@@ -163,6 +163,9 @@ inspect_text :: proc(pkg: ^Package, path: string) -> string {
 
 	// Level actors: the native body stores the actor references and the URL.
 	level_actors := 0
+	actors_located := 0
+	location_min: [3]f32
+	location_max: [3]f32
 	level_label := ""
 	actor_classes := make(map[string]int, 16)
 	defer delete(actor_classes)
@@ -181,6 +184,22 @@ inspect_text :: proc(pkg: ^Package, path: string) -> string {
 			class := actor_class_name(pkg, actor)
 			if class != "" {
 				actor_classes[class] += 1
+			}
+			if package_index_kind(actor) == .Export {
+				info, info_diags := read_actor_info(pkg, int(actor) - 1)
+				defer delete(info_diags.items)
+				if info.has_location {
+					if actors_located == 0 {
+						location_min = info.location
+						location_max = info.location
+					} else {
+						for k in 0..<3 {
+							location_min[k] = min(location_min[k], info.location[k])
+							location_max[k] = max(location_max[k], info.location[k])
+						}
+					}
+					actors_located += 1
+				}
 			}
 		}
 	}
@@ -241,6 +260,19 @@ inspect_text :: proc(pkg: ^Package, path: string) -> string {
 			fmt.sbprintf(&b, ", +%d more", len(order) - 6)
 		}
 		strings.write_byte(&b, '\n')
+		if actors_located > 0 {
+			fmt.sbprintf(
+				&b,
+				"transforms:   %d actor(s) with Location, bounds (%.0f, %.0f, %.0f) .. (%.0f, %.0f, %.0f)\n",
+				actors_located,
+				location_min[0],
+				location_min[1],
+				location_min[2],
+				location_max[0],
+				location_max[1],
+				location_max[2],
+			)
+		}
 	}
 
 	return strings.to_string(b)

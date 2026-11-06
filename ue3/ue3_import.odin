@@ -110,6 +110,65 @@ import_document :: proc(data: []u8, source_path: string) -> (doc: ir.Document, d
 			brushes += 1
 		}
 	}
+	// Actors: static mesh actors become entities. The class mapping turns a
+	// StaticMeshActor into prop_static for Source targets.
+	actors_total := 0
+	mesh_entities := 0
+	for e, i in pkg.exports {
+		if export_class_name(&pkg, e) != "Level" {
+			continue
+		}
+		level, level_d := read_level(&pkg, i)
+		merge(&d, &level_d)
+		if diag.has_errors(&level_d) {
+			continue
+		}
+		for actor in level.actors {
+			if package_index_kind(actor) != .Export {
+				continue
+			}
+			index := int(actor) - 1
+			info, info_d := read_actor_info(&pkg, index)
+			merge(&d, &info_d)
+			if diag.has_errors(&info_d) {
+				continue
+			}
+			actors_total += 1
+			if info.mesh_name == "" {
+				continue
+			}
+			entity := ir.make_entity("", info.class_name)
+			entity.origin = geom.Vec3 {
+				f64(info.location[0]),
+				f64(info.location[1]),
+				f64(info.location[2]),
+			}
+			if info.has_rotation {
+				entity.rotation = ir.Rotation {
+					pitch = info.rotation[0],
+					yaw   = info.rotation[1],
+					roll  = info.rotation[2],
+				}
+				entity.has_rotation = true
+			}
+			ir.push_property(&entity.props, "staticmesh", info.mesh_name)
+			append(&doc.entities, entity)
+			mesh_entities += 1
+		}
+	}
+	if actors_total > 0 {
+		diag.info(
+			&d,
+			"ue3.actors",
+			fmt.aprintf(
+				"created %d entity(ies) from %d actor(s); actors without a readable mesh are skipped",
+				mesh_entities,
+				actors_total,
+			),
+			source_path,
+		)
+	}
+
 	if bsp_solids > 0 {
 		diag.info(
 			&d,
@@ -139,10 +198,13 @@ import_document :: proc(data: []u8, source_path: string) -> (doc: ir.Document, d
 	if bsp_solids > 0 {
 		summary = fmt.aprintf("%s, %d BSP face(s) from %d solid region(s)", summary, bsp_faces, bsp_solids)
 	}
+	if mesh_entities > 0 {
+		summary = fmt.aprintf("%s, %d mesh entity(ies)", summary, mesh_entities)
+	}
 	diag.info(
 		&d,
 		"ue3.converted",
-		fmt.aprintf("%s; actors and materials are not converted yet", summary),
+		fmt.aprintf("%s; materials and mesh assets are not converted yet", summary),
 		source_path,
 	)
 	if degraded > 0 {
