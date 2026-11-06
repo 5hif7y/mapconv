@@ -264,6 +264,26 @@ convert_bytes :: proc(data: []u8, source_path: string, opts: Options) -> Result 
 		map_entity_properties(&res.doc, prof, res.target_format, &res.diagnostics)
 	}
 
+	// 3b. Source model paths. UE3 mesh references carry "<package>/<mesh>"; the
+	// matching .mdl comes from studiomdl on the QC/SMD pair that `extract`
+	// writes. Brush models ("*1") and already-qualified paths are left alone.
+	if res.target_format == .Source_VMF {
+		for &entity in res.doc.entities {
+			for &prop in entity.props {
+				if prop.key != "model" {
+					continue
+				}
+				text, is_string := prop.value.(string)
+				if !is_string || !strings.contains(text, "/") || strings.contains(text, ".") {
+					continue
+				}
+				path := fmt.aprintf("models/mapconv/%s.mdl", text)
+				prop.value = path
+				prop.raw = path
+			}
+		}
+	}
+
 	// 4. Validation of what is about to be written.
 	validate_document(&res.doc, &res.diagnostics)
 	if engine_of(res.source_format) != engine_of(res.target_format) {

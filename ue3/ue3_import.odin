@@ -11,6 +11,7 @@
 package ue3
 
 import "core:fmt"
+import "core:path/filepath"
 import "../diag"
 import "../geom"
 import "../ir"
@@ -19,6 +20,9 @@ import "../xform"
 import_document :: proc(data: []u8, source_path: string) -> (doc: ir.Document, d: diag.Diagnostics) {
 	doc = ir.init_document(.UE3_Package, xform.unreal_3())
 	doc.metadata.source_path = source_path
+	// Meshes embedded in the map are named after the map package, mirroring the
+	// directory layout that `extract` writes and the QC model path expects.
+	map_name := filepath.stem(source_path)
 
 	pkg, pkg_d := parse(data)
 	d = pkg_d
@@ -158,7 +162,11 @@ import_document :: proc(data: []u8, source_path: string) -> (doc: ir.Document, d
 			}
 			entity := ir.make_entity("", info.class_name)
 			set_actor_transform(&entity, info)
-			ir.push_property(&entity.props, "staticmesh", info.mesh_name)
+			owner := info.mesh_package
+			if owner == "" {
+				owner = map_name
+			}
+			ir.push_property(&entity.props, "staticmesh", fmt.aprintf("%s/%s", owner, info.mesh_name))
 			append(&doc.entities, entity)
 			mesh_entities += 1
 		}

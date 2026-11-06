@@ -469,10 +469,13 @@ UE3 package with the same 576/5 summary, so resolving a reference is:
 3. Parse the package and find the export with that name whose class is
    `StaticMesh`.
 
-`mapconv extract --content` writes, per referenced mesh, one OBJ per LOD plus an
-SMD (LOD 0, flat face normals, UV set 0) and a QC whose `$modelname` is
-`models/mapconv/<Package>/<Mesh>.mdl` and whose `$cdmaterials` directory matches
-the VMF `model` path convention. `studiomdl` turns that into the model the VMF
+`mapconv extract --content` writes, per mesh, one OBJ per LOD plus an SMD (LOD
+0, flat face normals, UV set 0) and a QC whose `$modelname` is
+`models/mapconv/<Package>/<Mesh>.mdl`. Embedded meshes use the map package name,
+so a `StaticMeshActor` in `EntryLevel.ccmap` referencing an embedded mesh becomes
+`models/mapconv/EntryLevel/<Mesh>.mdl`; an external one becomes
+`models/mapconv/<ContentPackage>/<Mesh>.mdl`. `convert` writes exactly those
+paths, and `$cdmaterials` mirrors the directory. `studiomdl` turns that into the model the VMF
 expects; the compiler is not part of this toolkit.
 
 UVs come from the legacy interleaved buffer (`FLegacyStaticMeshFullVertex`:

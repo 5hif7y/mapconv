@@ -11,6 +11,7 @@ package main
 
 import "core:fmt"
 import "core:os"
+import "core:path/filepath"
 import "core:strings"
 import "convert"
 import "diag"
@@ -428,7 +429,10 @@ run_extract :: proc(args: Args, text: string) {
 		ue3.content_index_destroy(&index)
 	}
 
-	// Static meshes embedded in the package: one OBJ per LOD, Unreal coordinates.
+	// Static meshes embedded in the package: one OBJ per LOD, under a directory
+	// named after the map, mirroring the "<package>/<mesh>.mdl" path the VMF
+	// references after studiomdl.
+	map_stem := filepath.stem(args.input)
 	for e, i in pkg.exports {
 		if !ue3.export_is_static_mesh(&pkg, e) {
 			continue
@@ -436,13 +440,15 @@ run_extract :: proc(args: Args, text: string) {
 		meshes += 1
 		mesh, mesh_d := ue3.read_static_mesh(&pkg, i)
 		merge_diags(&diagnostics, &mesh_d)
+		name := ue3.name_text(&pkg, e.object_name)
+		dir := fmt.aprintf("%s/%s", args.output, map_stem)
+		_ = os.make_directory_all(dir)
 		for lod_index in 0..<len(mesh.lods) {
 			obj := ue3.static_mesh_obj(&mesh, lod_index)
 			if len(obj) == 0 {
 				continue
 			}
-			name := ue3.name_text(&pkg, e.object_name)
-			path := fmt.aprintf("%s/%s_L%d.obj", args.output, name, lod_index)
+			path := fmt.aprintf("%s/%s_L%d.obj", dir, name, lod_index)
 			defer delete(path)
 			if os.write_entire_file(path, obj) != nil {
 				fmt.eprintfln("mapconv: cannot write %q", path)
@@ -451,6 +457,24 @@ run_extract :: proc(args: Args, text: string) {
 			obj_files += 1
 			delete(obj)
 		}
+		// SMD and QC for the model path the VMF uses: embedded meshes are named
+		// after the map package, referenced ones after their content package.
+		smd := ue3.static_mesh_smd(&mesh, 0)
+		smd_path := fmt.aprintf("%s/%s_L0.smd", dir, name)
+		if os.write_entire_file(smd_path, smd) == nil {
+			smd_files += 1
+		}
+		delete(smd_path)
+		delete(smd)
+		model_path := fmt.aprintf("models/mapconv/%s/%s.mdl", map_stem, name)
+		qc := ue3.static_mesh_qc(model_path, fmt.aprintf("%s_L0.smd", name), fmt.aprintf("models/mapconv/%s/", map_stem))
+		qc_path := fmt.aprintf("%s/%s.qc", dir, name)
+		if os.write_entire_file(qc_path, qc) == nil {
+			qc_files += 1
+		}
+		delete(qc_path)
+		delete(qc)
+		delete(model_path)
 		ue3.static_mesh_destroy(&mesh)
 	}
 

@@ -89,7 +89,9 @@ brushes, missing materials) without writing anything.
   extract` writes inline texture mips as DDS files (streamed mips are reported)
   and one OBJ per LOD. With `--content <CookedPC>`, mesh imports are resolved to
   their content package, UV set 0 is read from the legacy vertex buffer, and an
-  SMD + QC are written for the first LOD.
+  SMD + QC are written for the first LOD. `convert` writes matching
+  `models/mapconv/<package>/<mesh>.mdl` references, with embedded meshes named
+  after the map package.
 - `vmf` / `t3d` / `bsp` / `ue3`: format adapters. `bsp` imports compiled Source
   maps by reconstructing brushes from the BSP tree (method of ericw-tools'
   `bsputil --decompile`, see `docs/formats/source-bsp.md`). `ue3` reads the
