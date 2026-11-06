@@ -19,6 +19,7 @@ import "convert"
 import "diag"
 import "ir"
 import "ue3"
+import "vtf"
 
 VERSION :: "0.1.0"
 
@@ -363,6 +364,28 @@ merge_diags :: proc(dst: ^diag.Diagnostics, src: ^diag.Diagnostics) {
 // run_extract writes every readable texture of a UE3 package as a DDS file.
 // Streamed mips (texture file cache) and unsupported formats are reported.
 run_extract :: proc(args: Args, text: string) {
+	lower_input := strings.to_lower(args.input)
+	if strings.has_suffix(lower_input, ".vtf") {
+		diagnostics := diag.init()
+		dds, format_name, ok := vtf.to_dds(transmute([]u8)text, &diagnostics)
+		if !ok {
+			print_diagnostics(&diagnostics, args.quiet, args.report)
+			os.exit(1)
+		}
+		if err := os.make_directory_all(args.output); err != nil {
+			fmt.eprintfln("mapconv: cannot create %q", args.output)
+			os.exit(2)
+		}
+		base := filepath.stem(args.input)
+		path := fmt.aprintf("%s/%s.dds", args.output, base)
+		if os.write_entire_file(path, dds) != nil {
+			fmt.eprintfln("mapconv: cannot write %q", path)
+			os.exit(2)
+		}
+		fmt.printfln("wrote %s (%s, %d bytes)", path, format_name, len(dds))
+		print_diagnostics(&diagnostics, args.quiet, args.report)
+		return
+	}
 	format := args.from
 	if format == .Unknown {
 		detected, _ := convert.detect_format(args.input, text)

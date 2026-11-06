@@ -1,0 +1,153 @@
+// VTF: Valve Texture Format, the texture container inside Source BSP pakfiles.
+// Decodes the header and the largest mip of frame 0 / face 0 into a DDS.
+package vtf
+
+import "core:fmt"
+import "../diag"
+
+
+IMAGE_FORMAT_DXT1 :: 13
+IMAGE_FORMAT_DXT3 :: 14
+IMAGE_FORMAT_DXT5 :: 15
+IMAGE_FORMAT_BGRA8888 :: 12
+IMAGE_FORMAT_BGR888 :: 3
+IMAGE_FORMAT_A8 :: 8
+FLAG_ENVMAP :: 0x00004000
+
+Header :: struct {
+	major, minor: u32,
+	header_size:  int,
+	width, height: int,
+	flags:        u32,
+	frames:       int,
+	format:       u32,
+	mip_count:    int,
+	depth:        int,
+}
+
+read_header :: proc(data: []u8, d: ^diag.Diagnostics) -> (h: Header, ok: bool) {
+	if len(data) < 65 || data[0] != 'V' || data[1] != 'T' || data[2] != 'F' || data[3] != 0 {
+		diag.err(d, "vtf.bad-signature", "not a VTF file")
+		return
+	}
+	get_u16 :: proc(data: []u8, at: int) -> int { return int(data[at]) | int(data[at+1]) << 8 }
+	get_u32 :: proc(data: []u8, at: int) -> u32 {
+		return u32(data[at]) | u32(data[at+1]) << 8 | u32(data[at+2]) << 16 | u32(data[at+3]) << 24
+	}
+	h.major = get_u32(data, 4)
+	h.minor = get_u32(data, 8)
+	// 7.5 moved the fields by two bytes (headerSize becomes 32-bit); detect it
+	// from the width, which is never zero in a valid file.
+	shift := 0
+	h.width = get_u16(data, 14)
+	h.height = get_u16(data, 16)
+	if h.width == 0 {
+		shift = 2
+		h.header_size = int(get_u32(data, 12))
+		h.width = get_u16(data, 16)
+		h.height = get_u16(data, 18)
+	} else {
+		h.header_size = get_u16(data, 12)
+	}
+	h.flags = get_u32(data, 18 + shift)
+	h.frames = get_u16(data, 22 + shift)
+	if h.frames < 1 { h.frames = 1 }
+	h.format = get_u32(data, 50 + shift)
+	h.mip_count = int(data[54 + shift])
+	if h.mip_count < 1 { h.mip_count = 1 }
+	if h.major > 7 || (h.major == 7 && h.minor >= 3) {
+		h.depth = get_u16(data, 61 + shift)
+		if h.depth < 1 { h.depth = 1 }
+	} else { h.depth = 1 }
+	if h.width == 0 || h.height == 0 {
+		diag.err(d, "vtf.bad-size", "VTF has a zero dimension")
+		return
+	}
+	return h, true
+}
+
+mip_size :: proc(format: u32, width, height: int) -> int {
+	switch format {
+	case IMAGE_FORMAT_DXT1:
+		return max(1, (width+3)/4) * max(1, (height+3)/4) * 8
+	case IMAGE_FORMAT_DXT3, IMAGE_FORMAT_DXT5:
+		return max(1, (width+3)/4) * max(1, (height+3)/4) * 16
+	case IMAGE_FORMAT_BGRA8888:
+		return width*height*4
+	case IMAGE_FORMAT_BGR888:
+		return width*height*3
+	case IMAGE_FORMAT_A8:
+		return width*height
+	}
+	return 0
+}
+
+to_dds :: proc(data: []u8, d: ^diag.Diagnostics) -> (out: []u8, format_name: string, ok: bool) {
+	h, header_ok := read_header(data, d)
+	if !header_ok { return }
+	if h.frames > 1 || h.depth > 1 {
+		diag.warn(d, "vtf.unsupported-layout", "animated/volumetric VTFs: using frame 0")
+	}
+	top := mip_size(h.format, h.width, h.height)
+	if top == 0 {
+		diag.warn(d, "vtf.unsupported-format", fmt.aprintf("image format %d is not supported", h.format))
+		return
+	}
+	if h.header_size <= 0 || h.header_size > len(data) {
+		diag.err(d, "vtf.bad-header-size", "VTF header size is outside the file")
+		return
+	}
+	offset := h.header_size
+	w, hh := h.width, h.height
+	for mip := 1; mip < h.mip_count; mip += 1 {
+		offset += mip_size(h.format, w, hh)
+		w = max(1, w/2); hh = max(1, hh/2)
+	}
+	if offset + top > len(data) {
+		diag.err(d, "vtf.truncated", "VTF mip data is shorter than declared")
+		return
+	}
+	buf := make([dynamic]u8, 0, 128+top)
+	append(&buf, ..transmute([]u8)string("DDS "))
+	append_u32(&buf, 124)
+	append_u32(&buf, 0x00081007)
+	append_u32(&buf, u32(h.height))
+	append_u32(&buf, u32(h.width))
+	append_u32(&buf, u32(top))
+	append_u32(&buf, 0)
+	append_u32(&buf, 0)
+	for _ in 0..<11 { append_u32(&buf, 0) }
+	append_u32(&buf, 32)
+	switch h.format {
+	case IMAGE_FORMAT_DXT1, IMAGE_FORMAT_DXT3, IMAGE_FORMAT_DXT5:
+		fourcc := "DXT1"
+		if h.format == IMAGE_FORMAT_DXT3 { fourcc = "DXT3" }
+		if h.format == IMAGE_FORMAT_DXT5 { fourcc = "DXT5" }
+		format_name = fourcc
+		append_u32(&buf, 0x4)
+		append(&buf, ..transmute([]u8)fourcc)
+		for _ in 0..<5 { append_u32(&buf, 0) }
+	case IMAGE_FORMAT_BGRA8888:
+		format_name = "BGRA8"
+		append_u32(&buf, 0x41); append_u32(&buf, 0); append_u32(&buf, 32)
+		append_u32(&buf, 0x00ff0000); append_u32(&buf, 0x0000ff00)
+		append_u32(&buf, 0x000000ff); append_u32(&buf, 0xff000000)
+	case IMAGE_FORMAT_BGR888:
+		format_name = "BGR888"
+		append_u32(&buf, 0x40); append_u32(&buf, 0); append_u32(&buf, 24)
+		append_u32(&buf, 0x00ff0000); append_u32(&buf, 0x0000ff00)
+		append_u32(&buf, 0x000000ff); append_u32(&buf, 0)
+	case IMAGE_FORMAT_A8:
+		format_name = "A8"
+		append_u32(&buf, 0x20000); append_u32(&buf, 0); append_u32(&buf, 8)
+		append_u32(&buf, 0xff); append_u32(&buf, 0); append_u32(&buf, 0); append_u32(&buf, 0)
+	}
+	append_u32(&buf, 0x1000)
+	for _ in 0..<4 { append_u32(&buf, 0) }
+	append(&buf, ..data[offset:offset+top])
+	return buf[:], format_name, true
+}
+
+append_u32 :: proc(buf: ^[dynamic]u8, value: u32) {
+	append(buf, u8(value), u8(value >> 8), u8(value >> 16), u8(value >> 24))
+}

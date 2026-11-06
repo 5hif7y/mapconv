@@ -39,7 +39,7 @@ make test
 mapconv convert  --input <file> --output <file> [options]
 mapconv inspect  --input <file> [--from <format>]
 mapconv validate --input <file> [--from <format>]
-mapconv extract  --input <file.ccmap|ccpk|bsp> --output <dir> [--content <dir>]   # DDS + OBJ/SMD/QC or BSP pakfile
+mapconv extract  --input <file.ccmap|ccpk|bsp|vtf> --output <dir> [--content <dir>]   # DDS/OBJ/SMD/QC, BSP pakfile, or VTF
 mapconv audit    --input <file>   # byte coverage: interprets vs skips, by class
 mapconv --version
 ```
@@ -193,6 +193,8 @@ Implemented:
       3 LODs).
 - [x] Source BSP pakfile: read the embedded ZIP (store and deflate) and write
       every entry (VTF/VMT/sounds); `cs_assault`: 214 entries, 3.9 MB.
+- [x] VTF -> DDS: header (7.2/7.5), DXT1/3/5, BGRA8, BGR888, A8, largest mip;
+      the 60 VTFs of `cs_assault` convert in one pass.
 - [x] Byte-coverage audit: `mapconv audit` reports the bytes interpreted per
       class (all 218 maps: 49.66 % of 5.33 GB; see `AUDIT.md`).
 - [x] Content resolution: a `CookedPC` index maps package names to `.ccpk` files;
