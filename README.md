@@ -39,7 +39,7 @@ make test
 mapconv convert  --input <file> --output <file> [options]
 mapconv inspect  --input <file> [--from <format>]
 mapconv validate --input <file> [--from <format>]
-mapconv extract  --input <file.ccmap|ccpk> --output <dir>   # DDS + OBJ
+mapconv extract  --input <file.ccmap|ccpk> --output <dir> [--content <dir>]   # DDS + OBJ/SMD/QC
 mapconv --version
 ```
 
@@ -49,6 +49,7 @@ mapconv --version
 | `--to vmf|t3d` | override the output format (otherwise detected from the output path) |
 | `--profile <name>` | entity mapping profile: `default`, `source1-to-unreal3`, `unreal3-to-source1` |
 | `--report <file>` | write the diagnostic report to a file as well as stderr |
+| `--content <dir>` | cooked install root (`CookedPC`); resolves mesh imports to their `.ccpk` packages |
 | `--quiet` | print only errors |
 | `--no-materials` | skip the per-material notes |
 
@@ -68,7 +69,7 @@ brushes, missing materials) without writing anything.
 | Source 1 VMF (`.vmf`, format 100) | yes | yes | solids, sides, planes, texture axes, entity key/values, editor and unknown blocks preserved |
 | Source 1 BSP (`.bsp`, version 20) | yes | no | world brushes reconstructed from the BSP tree, brush entities read from the brush lumps; displacements and baked data reported |
 | Unreal Engine 3 T3D (`.t3d`) | yes | yes | actors, brushes, polygons, surface flags, materials, unknown properties preserved |
-| CrimeCraft cooked packages (`.ccmap`) | brush volumes + BSP solids + actors | no | summary and tables, `UPolys` brush polygons, convex BSP solids, actors as entities (`StaticMeshActor` -> `prop_static`, lights -> `light` with `_light`), and `extract` writes inline texture mips as DDS; mesh/material assets are not converted |
+| CrimeCraft cooked packages (`.ccmap`/`.ccpk`) | brush volumes + BSP solids + actors | no | summary and tables, `UPolys` brush polygons, convex BSP solids, actors as entities (`StaticMeshActor` -> `prop_static`, lights -> `light` with `_light`). `extract` writes inline texture mips as DDS and static mesh LODs as OBJ; with `--content` it also resolves mesh imports to their `.ccpk` and writes SMD + QC. Materials are not converted |
 | GoldSrc `.map`, Valve 220 | no | no | format identifiers reserved; no adapter yet |
 | Source 2, other engines | no | no | separate research |
 
@@ -86,7 +87,9 @@ brushes, missing materials) without writing anything.
 - `kv`: the shared Valve key/value block tree (VMF and the BSP entity lump).
 - `ue3` also reads `Texture2D` objects and `UStaticMesh` geometry; `mapconv
   extract` writes inline texture mips as DDS files (streamed mips are reported)
-  and one OBJ per static mesh LOD.
+  and one OBJ per LOD. With `--content <CookedPC>`, mesh imports are resolved to
+  their content package, UV set 0 is read from the legacy vertex buffer, and an
+  SMD + QC are written for the first LOD.
 - `vmf` / `t3d` / `bsp` / `ue3`: format adapters. `bsp` imports compiled Source
   maps by reconstructing brushes from the BSP tree (method of ericw-tools'
   `bsputil --decompile`, see `docs/formats/source-bsp.md`). `ue3` reads the
@@ -182,13 +185,17 @@ Implemented:
       Source `light`/`light_spot`/`light_environment` entities with `_light`
       (villyard: 169 lights, EntryLevel: 16).
 - [x] Static mesh geometry: the 576 legacy render-data path (kDOP tree, legacy
-      interleaved vertex buffer, shadow extrusion, 16-bit indices); `extract`
-      writes one OBJ per LOD (EngineMeshes: 3 meshes; city01: 2 meshes, 3 LODs).
+      interleaved vertex buffer, shadow extrusion, 16-bit indices, UV set 0);
+      `extract` writes one OBJ per LOD (EngineMeshes: 3 meshes; city01: 2 meshes,
+      3 LODs).
+- [x] Content resolution: a `CookedPC` index maps package names to `.ccpk` files;
+      `extract --content` follows actor mesh imports, writes OBJ/SMD and a QC
+      (`EntryLevel`: 22 embedded meshes, 1 referenced package).
 
 Next, in rough order:
 
 - [ ] Texture file cache support (`.tfc`) for streamed mips and UE3 material
-      graphs to Source materials; compile extracted OBJ meshes into Source models.
+      graphs to Source materials; run the generated QC through studiomdl.
 - [ ] Unreal CSG evaluation/reconstruction for subtractive brushes when targeting
       brush-based formats.
 - [ ] GoldSrc `.map` / Valve 220 adapter.

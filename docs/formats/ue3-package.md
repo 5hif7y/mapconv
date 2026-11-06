@@ -454,3 +454,27 @@ Geometry extraction uses the position and index buffers, not `RawTriangles`
 
 The reader refuses packages at or above `VER_REMOVED_SHADOW_VOLUMES` (686)
 instead of silently misreading a newer buffer layout.
+
+## Content packages and mesh references
+
+A cooked map does not embed the meshes its actors use: the StaticMeshComponent
+stores an `FPackageIndex` whose import chain ends at a package import (for
+example `EngineMeshes`). Every `.ccpk` in the cooked install is itself a normal
+UE3 package with the same 576/5 summary, so resolving a reference is:
+
+1. Walk the import's `OuterIndex` chain to the topmost import: that name is the
+   package, and the first import's `ObjectName` is the mesh.
+2. Look the package up in a directory index (`--content <CookedPC>`, base names
+   compared case-insensitively; the first duplicate wins).
+3. Parse the package and find the export with that name whose class is
+   `StaticMesh`.
+
+`mapconv extract --content` writes, per referenced mesh, one OBJ per LOD plus an
+SMD (LOD 0, flat face normals, UV set 0) and a QC whose `$modelname` is
+`models/mapconv/<Package>/<Mesh>.mdl` and whose `$cdmaterials` directory matches
+the VMF `model` path convention. `studiomdl` turns that into the model the VMF
+expects; the compiler is not part of this toolkit.
+
+UVs come from the legacy interleaved buffer (`FLegacyStaticMeshFullVertex`:
+TangentX, TangentZ, Color, then `NumTexCoords` float16 pairs). SMD flips V
+because StudioMDL's texture space is bottom-up.

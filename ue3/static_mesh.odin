@@ -36,7 +36,13 @@ STATICMESH_VERSION_CONTENT_TAGS :: 17
 STATIC_MESH_TRIANGLE_SIZE :: 272
 
 // FStaticMeshElement, reduced to what the converter needs.
+Vec2 :: struct {
+	x, y: f32,
+}
+
 Static_Mesh_Section :: struct {
+	material_name:  string,
+	material_ref:   i32, // FPackageIndex of the UMaterialInterface
 	material_index: i32,
 	first_index:    i32,
 	num_triangles:  i32,
@@ -50,6 +56,9 @@ Static_Mesh_Lod :: struct {
 	num_vertices:  i32,
 	positions:     []Vec3,
 	indices:       []u16,
+	// UV set 0 of each vertex (the legacy interleaved buffer stores all UV
+	// sets; the first one is what a Source material expects).
+	uvs:           []Vec2,
 	sections:      []Static_Mesh_Section,
 	num_tex_coords: i32,
 	// Position buffer size before trimming the shadow clones; useful to explain
@@ -144,6 +153,9 @@ read_static_mesh :: proc(
 			}
 			return
 		}
+		for &section in lod.sections {
+			section.material_name = package_index_name(pkg, section.material_ref)
+		}
 		mesh.lods[i] = lod
 	}
 	return
@@ -216,6 +228,7 @@ read_static_mesh_lod :: proc(
 			mat = material
 		}
 		lod.sections[i] = Static_Mesh_Section {
+			material_ref   = material,
 			material_index = mat,
 			first_index    = first_index,
 			num_triangles  = num_triangles,
@@ -246,7 +259,7 @@ read_static_mesh_lod :: proc(
 	num_tex_coords := read_i32(r)
 	vertex_stride := read_i32(r)
 	vertex_count := read_i32(r)
-	_ = read_i32(r) // bUseFullPrecisionUVs
+	full_precision := read_i32(r) != 0
 	v_element_size, v_bulk_count, v_ok := read_bulk_header(r)
 	if r.failed || !v_ok || v_element_size != vertex_stride || vertex_count != v_bulk_count {
 		diag.err(&d, "ue3.static-mesh-vertices", "unexpected legacy vertex buffer layout")
@@ -256,8 +269,27 @@ read_static_mesh_lod :: proc(
 		diag.err(&d, "ue3.truncated", r.message)
 		return
 	}
-	r.pos += int(v_bulk_count) * int(vertex_stride)
 	lod.num_tex_coords = num_tex_coords
+	// FLegacyStaticMeshFullVertex: TangentX, TangentZ, Color (12 bytes), then
+	// NumTexCoords UV pairs (float16, or float32 when bUseFullPrecisionUVs).
+	uv_size := 4 if !full_precision else 8
+	if num_tex_coords > 0 && int(vertex_stride) == 12 + int(uv_size) * int(num_tex_coords) {
+		lod.uvs = make([]Vec2, int(v_bulk_count), allocator)
+		for i in 0..<int(v_bulk_count) {
+			r.pos += 12
+			uv: Vec2
+			if full_precision {
+				uv = Vec2{read_f32(r), read_f32(r)}
+				r.pos += int(uv_size) * (int(num_tex_coords) - 1)
+			} else {
+				uv = Vec2{half_to_f32(read_u16(r)), half_to_f32(read_u16(r))}
+				r.pos += int(uv_size) * (int(num_tex_coords) - 1)
+			}
+			lod.uvs[i] = uv
+		}
+	} else {
+		r.pos += int(v_bulk_count) * int(vertex_stride)
+	}
 
 	// Legacy shadow extrusion buffer.
 	extrusion_stride := read_i32(r)
@@ -282,6 +314,9 @@ read_static_mesh_lod :: proc(
 	}
 	lod.num_vertices = num_vertices
 	lod.positions = lod.positions[:int(num_vertices)]
+	if len(lod.uvs) >= int(num_vertices) {
+		lod.uvs = lod.uvs[:int(num_vertices)]
+	}
 
 	// Index buffer: FRawStaticIndexBuffer stores 16-bit indices in a resource
 	// array, so the element size is always 2 at this version.
@@ -328,11 +363,18 @@ read_static_mesh_lod :: proc(
 	return
 }
 
+// half_to_f32 decodes an IEEE 754 binary16 value, the storage used by the
+// legacy UV sets.
+half_to_f32 :: proc(bits: u16) -> f32 {
+	return f32(transmute(f16)bits)
+}
+
 // static_mesh_destroy releases the slices of a parsed mesh.
 static_mesh_destroy :: proc(mesh: ^Static_Mesh) {
 	for &lod in mesh.lods {
 		delete(lod.positions)
 		delete(lod.indices)
+		delete(lod.uvs)
 		delete(lod.sections)
 	}
 	delete(mesh.lods)
@@ -353,8 +395,111 @@ static_mesh_obj :: proc(mesh: ^Static_Mesh, lod_index: int) -> string {
 	for p in lod.positions {
 		fmt.sbprintf(&b, "v %.6f %.6f %.6f\n", p.x, p.y, p.z)
 	}
-	for i := 0; i + 2 < len(lod.indices); i += 3 {
-		fmt.sbprintf(&b, "f %d %d %d\n", lod.indices[i] + 1, lod.indices[i + 1] + 1, lod.indices[i + 2] + 1)
+	has_uv := len(lod.uvs) == len(lod.positions)
+	if has_uv {
+		for uv in lod.uvs {
+			fmt.sbprintf(&b, "vt %.6f %.6f\n", uv.x, 1 - uv.y)
+		}
 	}
+	for i := 0; i + 2 < len(lod.indices); i += 3 {
+		a := lod.indices[i] + 1
+		bb := lod.indices[i + 1] + 1
+		c := lod.indices[i + 2] + 1
+		if has_uv {
+			fmt.sbprintf(&b, "f %d/%d %d/%d %d/%d\n", a, a, bb, bb, c, c)
+		} else {
+			fmt.sbprintf(&b, "f %d %d %d\n", a, bb, c)
+		}
+	}
+	return strings.to_string(b)
+}
+
+// vec3_sub/cross/normalize are local to keep the mesh writer dependency-free.
+vec3_sub :: proc(a, b: Vec3) -> Vec3 {
+	return Vec3{a.x - b.x, a.y - b.y, a.z - b.z}
+}
+
+vec3_cross :: proc(a, b: Vec3) -> Vec3 {
+	return Vec3 {
+		a.y * b.z - a.z * b.y,
+		a.z * b.x - a.x * b.z,
+		a.x * b.y - a.y * b.x,
+	}
+}
+
+vec3_normalize :: proc(v: Vec3) -> Vec3 {
+	length := v.x * v.x + v.y * v.y + v.z * v.z
+	if length <= 0 {
+		return Vec3{0, 0, 1}
+	}
+	inv := 1 / sqrt_f32(length)
+	return Vec3{v.x * inv, v.y * inv, v.z * inv}
+}
+
+sqrt_f32 :: proc(v: f32) -> f32 {
+	// Newton iteration is enough for shading normals and avoids pulling in math.
+	x := v
+	if x <= 0 {
+		return 0
+	}
+	for _ in 0..<12 {
+		x = 0.5 * (x + v / x)
+	}
+	return x
+}
+
+// static_mesh_smd renders one LOD as a StudioMDL reference mesh: one material
+// per section, flat face normals and UV set 0.
+static_mesh_smd :: proc(mesh: ^Static_Mesh, lod_index: int) -> string {
+	if lod_index < 0 || lod_index >= len(mesh.lods) {
+		return ""
+	}
+	lod := mesh.lods[lod_index]
+	b := strings.builder_make()
+	strings.write_string(&b, "version 1\nnodes\n0 \"static\" -1\nend\nskeleton\ntime 0\n0 0 0 0 0 0 0\nend\ntriangles\n")
+	has_uv := len(lod.uvs) >= len(lod.positions)
+	for i := 0; i + 2 < len(lod.indices); i += 3 {
+		a := int(lod.indices[i])
+		bb := int(lod.indices[i + 1])
+		c := int(lod.indices[i + 2])
+		material := "mapconv/unknown"
+		for section in lod.sections {
+			if i >= int(section.first_index) && i < int(section.first_index) + int(section.num_triangles) * 3 {
+				if section.material_name != "" {
+					material = section.material_name
+				}
+				break
+			}
+		}
+		p0 := lod.positions[a]
+		p1 := lod.positions[bb]
+		p2 := lod.positions[c]
+		n := vec3_normalize(vec3_cross(vec3_sub(p1, p0), vec3_sub(p2, p0)))
+		fmt.sbprintf(&b, "%s\n", material)
+		for vertex in ([]int{a, bb, c}) {
+			p := lod.positions[vertex]
+			uv := Vec2{0, 0}
+			if has_uv {
+				uv = lod.uvs[vertex]
+			}
+			fmt.sbprintf(
+				&b,
+				"0 %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f\n",
+				p.x, p.y, p.z, n.x, n.y, n.z, uv.x, 1 - uv.y,
+			)
+		}
+	}
+	strings.write_string(&b, "end\n")
+	return strings.to_string(b)
+}
+
+// static_mesh_qc writes a compile-ready QC: the model name is the .mdl the VMF
+// should reference after studiomdl runs, and the body points at the LOD 0 SMD.
+static_mesh_qc :: proc(model_name, smd_name, materials_dir: string) -> string {
+	b := strings.builder_make()
+	fmt.sbprintf(&b, "$modelname \"%s\"\n", model_name)
+	fmt.sbprintf(&b, "$body \"body\" \"%s\"\n", smd_name)
+	fmt.sbprintf(&b, "$cdmaterials \"%s\"\n", materials_dir)
+	strings.write_string(&b, "$surfaceprop \"default\"\n$staticprop\n")
 	return strings.to_string(b)
 }

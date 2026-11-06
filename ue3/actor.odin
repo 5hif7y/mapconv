@@ -23,6 +23,10 @@ Actor_Info :: struct {
 	has_component:   bool,
 	// Mesh asset name resolved through the component, when it has one.
 	mesh_name:       string,
+	// Import index of that mesh (negative FPackageIndex) and the content package
+	// its outer chain points at, used to fetch the geometry.
+	mesh_import:     i32,
+	mesh_package:    string,
 	// Light data, from the component or (as a fallback) the actor itself.
 	brightness:      f32,
 	light_color:     [4]u8, // FColor is stored B, G, R, A
@@ -87,6 +91,8 @@ read_actor_info :: proc(
 					if tag, ok := find_tag(pkg, comp_head.tags, name); ok {
 						if value, ok2 := tag_i32(pkg, tag); ok2 && value != 0 {
 							info.mesh_name = package_index_name(pkg, value)
+							info.mesh_import = value
+							info.mesh_package, _ = import_package(pkg, value)
 							break
 						}
 					}

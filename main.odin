@@ -36,6 +36,7 @@ Options:
   --profile <name>     entity mapping profile (default, source1-to-unreal3,
                        unreal3-to-source1)
   --report <file>      write the diagnostic report to a file as well as stderr
+  --content <dir>      cooked content directory used to resolve mesh imports
   --quiet              only print errors
   --no-materials       skip the per-material notes
 
@@ -57,6 +58,7 @@ Args :: struct {
 	to:       ir.Format,
 	profile:  string,
 	report:   string,
+	content:  string,
 	quiet:    bool,
 	materials: bool,
 	ok:       bool,
@@ -115,7 +117,7 @@ parse_args :: proc(argv: []string) -> (args: Args, ok: bool) {
 		flag := argv[i]
 		need_value := proc(flag: string) -> bool {
 			switch flag {
-			case "--input", "--output", "--from", "--to", "--profile", "--report":
+			case "--input", "--output", "--from", "--to", "--profile", "--report", "--content":
 				return true
 			}
 			return false
@@ -150,6 +152,8 @@ parse_args :: proc(argv: []string) -> (args: Args, ok: bool) {
 				args.profile = value
 			case "--report":
 				args.report = value
+			case "--content":
+				args.content = value
 			}
 			continue
 		}
@@ -317,6 +321,9 @@ run_extract :: proc(args: Args, text: string) {
 	skipped := 0
 	meshes := 0
 	obj_files := 0
+	referenced_meshes := 0
+	smd_files := 0
+	qc_files := 0
 	for e, i in pkg.exports {
 		if ue3.export_class_name(&pkg, e) != "Texture2D" {
 			continue
@@ -337,8 +344,91 @@ run_extract :: proc(args: Args, text: string) {
 		}
 		written += 1
 	}
-	// Static meshes: one OBJ per LOD, in Unreal coordinates (Z up). The geometry
-	// is self-contained in the package; materials are a later stage.
+	// Referenced meshes: the map only stores imports; with --content, follow the
+	// import chain to the content package, then write OBJ (every LOD), an SMD and
+	// a QC for the LOD 0 so studiomdl can produce the .mdl the VMF references.
+	if args.content != "" {
+		index, index_d := ue3.content_index(args.content)
+		merge_diags(&diagnostics, &index_d)
+		seen := make([dynamic]string, 0, 8)
+		defer delete(seen)
+		for e, i in pkg.exports {
+			if ue3.export_class_name(&pkg, e) != "Level" {
+				continue
+			}
+			level, level_d := ue3.read_level(&pkg, i)
+			merge_diags(&diagnostics, &level_d)
+			if diag.has_errors(&level_d) {
+				continue
+			}
+			for actor in level.actors {
+				if ue3.package_index_kind(actor) != .Export {
+					continue
+				}
+				info, info_d := ue3.read_actor_info(&pkg, int(actor) - 1)
+				merge_diags(&diagnostics, &info_d)
+				if diag.has_errors(&info_d) || info.mesh_import >= 0 || info.mesh_name == "" {
+					continue
+				}
+				key := fmt.aprintf("%s/%s", info.mesh_package, info.mesh_name)
+				already := false
+				for previous in seen {
+					if previous == key {
+						already = true
+						break
+					}
+				}
+				if already {
+					delete(key)
+					continue
+				}
+				append(&seen, key)
+				resolved, res_d := ue3.resolve_static_mesh(&pkg, info.mesh_import, &index)
+				merge_diags(&diagnostics, &res_d)
+				if diag.has_errors(&res_d) || len(resolved.mesh.lods) == 0 {
+					if len(resolved.mesh.lods) > 0 {
+						ue3.resolved_mesh_destroy(&resolved)
+					}
+					continue
+				}
+				package_dir := fmt.aprintf("%s/%s", args.output, info.mesh_package)
+				defer delete(package_dir)
+				_ = os.make_directory_all(package_dir)
+				for lod_index in 0..<len(resolved.mesh.lods) {
+					obj := ue3.static_mesh_obj(&resolved.mesh, lod_index)
+					path := fmt.aprintf("%s/%s_L%d.obj", package_dir, info.mesh_name, lod_index)
+					if os.write_entire_file(path, obj) != nil {
+						fmt.eprintfln("mapconv: cannot write %q", path)
+						os.exit(2)
+					}
+					delete(path)
+					delete(obj)
+					obj_files += 1
+				}
+				smd := ue3.static_mesh_smd(&resolved.mesh, 0)
+				smd_path := fmt.aprintf("%s/%s_L0.smd", package_dir, info.mesh_name)
+				if os.write_entire_file(smd_path, smd) == nil {
+					smd_files += 1
+				}
+				delete(smd_path)
+				delete(smd)
+				model_path := fmt.aprintf("models/mapconv/%s/%s.mdl", info.mesh_package, info.mesh_name)
+				qc := ue3.static_mesh_qc(model_path, fmt.aprintf("%s_L0.smd", info.mesh_name), fmt.aprintf("models/mapconv/%s/", info.mesh_package))
+				qc_path := fmt.aprintf("%s/%s.qc", package_dir, info.mesh_name)
+				if os.write_entire_file(qc_path, qc) == nil {
+					qc_files += 1
+				}
+				delete(qc_path)
+				delete(qc)
+				delete(model_path)
+				ue3.resolved_mesh_destroy(&resolved)
+				referenced_meshes += 1
+			}
+		}
+		ue3.content_index_destroy(&index)
+	}
+
+	// Static meshes embedded in the package: one OBJ per LOD, Unreal coordinates.
 	for e, i in pkg.exports {
 		if !ue3.export_is_static_mesh(&pkg, e) {
 			continue
@@ -365,12 +455,15 @@ run_extract :: proc(args: Args, text: string) {
 	}
 
 	fmt.printfln(
-		"extracted %d texture(s) of %d (%d skipped: streamed or unsupported format), %d OBJ file(s) from %d static mesh(es)",
+		"extracted %d texture(s) of %d (%d skipped), %d OBJ file(s) from %d embedded mesh(es), %d referenced mesh(es) (%d SMD, %d QC)",
 		written,
 		total,
 		skipped,
 		obj_files,
 		meshes,
+		referenced_meshes,
+		smd_files,
+		qc_files,
 	)
 	print_diagnostics(&diagnostics, args.quiet, args.report)
 }

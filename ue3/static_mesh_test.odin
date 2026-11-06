@@ -60,14 +60,21 @@ build_static_mesh_payload :: proc(payload_offset: int) -> [dynamic]u8 {
 	put_f32(&p, 10); put_f32(&p, 0); put_f32(&p, 0)
 	put_f32(&p, 0); put_f32(&p, 10); put_f32(&p, 0)
 
-	// Legacy interleaved vertex buffer: one UV set, 28-byte stride.
-	put_i32(&p, 1) // NumTexCoords
-	put_i32(&p, 28) // stride
+	// Legacy interleaved vertex buffer: two UV sets, 20-byte stride. Tangents
+	// and color are zero; UV0 is (0.25, 0.5) for every vertex.
+	put_i32(&p, 2) // NumTexCoords
+	put_i32(&p, 20) // stride
 	put_i32(&p, 3) // count
 	put_i32(&p, 0) // bUseFullPrecisionUVs
-	put_bulk_header(&p, 28, 3)
-	for _ in 0..<84 {
-		append(&p.buf, 0)
+	put_bulk_header(&p, 20, 3)
+	for _ in 0..<3 {
+		for _ in 0..<12 {
+			append(&p.buf, 0)
+		}
+		put_half(&p, 0.25)
+		put_half(&p, 0.5)
+		put_half(&p, 0)
+		put_half(&p, 0)
 	}
 
 	// Legacy shadow extrusion buffer.
@@ -184,9 +191,32 @@ test_read_static_mesh :: proc(t: ^testing.T) {
 	testing.expect_value(t, lod.sections[0].num_triangles, i32(1))
 	testing.expect_value(t, lod.positions[1].x, f32(10))
 	testing.expect_value(t, lod.indices[2], u16(2))
+	testing.expect_value(t, len(lod.uvs), 3)
+	testing.expect(t, abs(lod.uvs[0].x - 0.25) < 0.001)
+	testing.expect(t, abs(lod.uvs[0].y - 0.5) < 0.001)
+	// The test mesh has no material reference, so the name stays empty.
+	testing.expect_value(t, lod.sections[0].material_name, "")
 
 	obj := static_mesh_obj(&mesh, 0)
 	defer delete(obj)
-	testing.expect(t, strings.contains(obj, "f 1 2 3"))
+	testing.expect(t, strings.contains(obj, "f 1/1 2/2 3/3"))
 	static_mesh_destroy(&mesh)
+}
+
+put_half :: proc(b: ^Builder, v: f32) {
+	bits := transmute(u16)(f16(v))
+	append(&b.buf, u8(bits), u8(bits >> 8))
+}
+
+@(test)
+test_import_package :: proc(t: ^testing.T) {
+	data := build_static_mesh_package()
+	pkg, d := parse(data[:])
+	defer delete(d.items)
+	testing.expect_value(t, diag.count(&d, .Error), 0)
+	// The mesh import's outer chain ends at the Engine package.
+	package_name, object_name := import_package(&pkg, -2)
+	testing.expect_value(t, package_name, "Engine")
+	testing.expect_value(t, object_name, "StaticMesh")
+	testing.expect_value(t, ascii_lower("EngineMeshes"), "enginemeshes")
 }
