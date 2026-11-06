@@ -62,3 +62,15 @@ test_round_trip :: proc(t: ^testing.T) {
 		testing.expect_value(t, dds[128 + i], mip[i])
 	}
 }
+
+@(test)
+test_encode_header_layout :: proc(t: ^testing.T) {
+	mip := [8]u8{0, 0xf8, 0, 0, 0x1f, 0, 0, 0}
+	encoded, ok := encode(4, 4, IMAGE_FORMAT_DXT1, [][]u8{mip[:]})
+	testing.expect(t, ok)
+	defer delete(encoded)
+	// The header size is a u32 at offset 12; width/height are u16 at 16 and 18.
+	testing.expect_value(t, u32(encoded[12]) | u32(encoded[13]) << 8 | u32(encoded[14]) << 16 | u32(encoded[15]) << 24, u32(80))
+	testing.expect_value(t, u16(encoded[16]) | u16(encoded[17]) << 8, u16(4))
+	testing.expect_value(t, u16(encoded[18]) | u16(encoded[19]) << 8, u16(4))
+}

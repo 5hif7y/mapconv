@@ -163,7 +163,7 @@ encode :: proc(width, height: int, format: u32, mips: [][]u8) -> (out: []u8, ok:
 	append(&buf, 'V', 'T', 'F', 0)
 	append_u32(&buf, 7)
 	append_u32(&buf, 2)
-	append(&buf, u8(80), 0) // header size
+	append_u32(&buf, 80) // header size
 	append(&buf, u8(width), u8(width >> 8), u8(height), u8(height >> 8))
 	append_u32(&buf, 0) // flags
 	append(&buf, 1, 0, 0, 0) // frames, first frame
