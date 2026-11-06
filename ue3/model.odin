@@ -380,3 +380,84 @@ model_polygons :: proc(model: ^Model, allocator := context.allocator) -> []Bsp_P
 	}
 	return out[:]
 }
+
+// ---------------------------------------------------------------------------
+// Solid reconstruction
+// ---------------------------------------------------------------------------
+
+// Solid_Plane is one half-space bounding a solid region, with the BSP node it
+// came from (for the surface material and texture vectors).
+Solid_Plane :: struct {
+	plane:      Plane4,
+	node_index: int,
+}
+
+// Bsp_Solid is one convex region of solid space: the intersection of its planes.
+Bsp_Solid :: struct {
+	planes: []Solid_Plane,
+}
+
+NF_NOT_CSG :: 0x01
+NF_IS_NEW :: 0x20
+
+// model_solids walks the BSP tree and returns the convex solid regions.
+//
+// UModel::PointCheck defines the rule: a point is outside if, following the
+// children, `outside` ends true. Going front (plane dot > dist) keeps the state
+// or turns it outside when the node is a CSG splitter; going back turns it
+// inside when the node is CSG. A leaf reached with outside == false is solid,
+// and the accumulated planes bound it.
+model_solids :: proc(model: ^Model, allocator := context.allocator) -> []Bsp_Solid {
+	out := make([dynamic]Bsp_Solid, 0, 16, allocator)
+	if len(model.nodes) == 0 {
+		return out[:]
+	}
+	path := make([dynamic]Solid_Plane, 0, 32, allocator)
+	walk_solid(model, 0, &path, model.root_outside, 0, &out, allocator)
+	delete(path)
+	return out[:]
+}
+
+walk_solid :: proc(
+	model: ^Model,
+	node_index: int,
+	path: ^[dynamic]Solid_Plane,
+	outside: bool,
+	depth: int,
+	out: ^[dynamic]Bsp_Solid,
+	allocator: mem.Allocator,
+) {
+	if depth > 1024 {
+		return
+	}
+	if node_index == -1 {
+		if outside {
+			return
+		}
+		planes := make([]Solid_Plane, len(path), allocator)
+		copy(planes, path[:])
+		append(out, Bsp_Solid{planes = planes})
+		return
+	}
+	if node_index < 0 || node_index >= len(model.nodes) {
+		return
+	}
+	node := model.nodes[node_index]
+	csg := node.num_vertices > 0 && (node.flags & (NF_NOT_CSG | NF_IS_NEW)) == 0
+	plane := node.plane
+
+	// A brush is the intersection of dot(p, n) <= dist half-spaces. The node's
+	// front region is dot(p, n) > dist, so it is bounded by the flipped plane;
+	// the back region is bounded by the plane as stored.
+	flipped := Plane4 {
+		normal = Vec3{-plane.normal.x, -plane.normal.y, -plane.normal.z},
+		dist   = -plane.dist,
+	}
+	append(path, Solid_Plane{flipped, node_index})
+	walk_solid(model, int(node.i_front), path, outside || csg, depth + 1, out, allocator)
+	resize(path, len(path) - 1)
+
+	append(path, Solid_Plane{plane, node_index})
+	walk_solid(model, int(node.i_back), path, outside && !csg, depth + 1, out, allocator)
+	resize(path, len(path) - 1)
+}

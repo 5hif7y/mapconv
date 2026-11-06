@@ -67,7 +67,7 @@ brushes, missing materials) without writing anything.
 | Source 1 VMF (`.vmf`, format 100) | yes | yes | solids, sides, planes, texture axes, entity key/values, editor and unknown blocks preserved |
 | Source 1 BSP (`.bsp`, version 20) | yes | no | world brushes reconstructed from the BSP tree, brush entities read from the brush lumps; displacements and baked data reported |
 | Unreal Engine 3 T3D (`.t3d`) | yes | yes | actors, brushes, polygons, surface flags, materials, unknown properties preserved |
-| CrimeCraft cooked packages (`.ccmap`) | brush volumes | no | summary and tables, object prelude, `UPolys` brush polygons converted to world brushes (`convert --to vmf`); the level BSP model is parsed and reported, and its polygons, actors, static meshes and materials are the next phase |
+| CrimeCraft cooked packages (`.ccmap`) | brush volumes + BSP solids | no | summary and tables, object prelude, `UPolys` brush polygons and convex solids reconstructed from the level BSP tree converted to world brushes (`convert --to vmf`); actors, static meshes and materials are the next phase |
 | GoldSrc `.map`, Valve 220 | no | no | format identifiers reserved; no adapter yet |
 | Source 2, other engines | no | no | separate research |
 
@@ -165,11 +165,11 @@ Implemented:
 - [x] UE3 `UModel` reader: bounds, vectors, points, BSP nodes, surfaces, verts,
       zones and bulk arrays, verified against real level models; polygons are
       resolved through the vertex pool.
+- [x] Convex solid reconstruction from the level BSP tree (`UModel::PointCheck`
+      semantics), with VMF faces, materials and texture vectors.
 
 Next, in rough order:
 
-- [ ] Reconstruct convex solids from the BSP node tree (as the Source
-      decompiler does), so the level's visible geometry reaches the IR.
 - [ ] `ULevel` actors and static mesh actors: transforms, mesh and material
       references; then materials and textures.
 - [ ] Unreal CSG evaluation/reconstruction for subtractive brushes when targeting

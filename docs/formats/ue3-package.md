@@ -272,8 +272,18 @@ vertex pool (`Verts`), each `FVert.pVertex` indexes `Points`, and `iSurf` gives
 the material, flags and texture vectors. `model_polygons` resolves that chain;
 `mapconv inspect` reports the totals ("bsp models: 2 model(s), 6 node(s), …").
 
-Reconstructing **convex solids** from those polygons and the node tree is the
-next stage; the nodes are surfaces, not closed brushes.
+Reconstructing **convex solids** from the node tree is implemented in
+`model_solids`, following `UModel::PointCheck`: a leaf reached with
+`outside == false` is solid, and its accumulated half-spaces bound it. The brush
+convention uses `dot(p, n) <= dist`, so the node's front region is bounded by the
+flipped plane and the back region by the plane as stored. Planes become faces
+through `geom.brush_face_winding`, with material and texture vectors taken from
+the node's surface (`pBase` indexes `Points`, so the projection is exact).
+
+`mapconv convert` uses the level BSP solids only when the level model's `Polys`
+is empty; otherwise the `UPolys` brushes already carry the geometry and adding
+the BSP would duplicate it (villyard: 22 solid regions, 188 faces, added to 361
+`UPolys` brushes).
 
 ## What is not implemented yet
 

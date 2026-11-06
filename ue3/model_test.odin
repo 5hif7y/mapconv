@@ -248,3 +248,41 @@ test_model_rejects_bad_bulk_sizes :: proc(t: ^testing.T) {
 	defer delete(m_diags.items)
 	testing.expect_value(t, diag.count(&m_diags, .Error), 1)
 }
+
+@(test)
+test_model_solids_follow_pointcheck_rule :: proc(t: ^testing.T) {
+	// One CSG node with RootOutside: the front leaf is outside, the back leaf is
+	// solid and bounded by the node plane as stored (brush convention).
+	payload := build_model_payload()
+	data := build_single_model_package(payload[:])
+	pkg, d := parse(data[:])
+	defer delete(d.items)
+	model, m_diags := read_model(&pkg, 0)
+	defer delete(m_diags.items)
+	solids := model_solids(&model)
+	testing.expect_value(t, len(solids), 1)
+	if len(solids) == 1 {
+		testing.expect_value(t, len(solids[0].planes), 1)
+		testing.expect_value(t, solids[0].planes[0].plane.normal.z, f32(1))
+		testing.expect_value(t, solids[0].planes[0].plane.dist, f32(0))
+		testing.expect_value(t, solids[0].planes[0].node_index, 0)
+	}
+}
+
+@(test)
+test_model_solids_ignore_non_csg_nodes :: proc(t: ^testing.T) {
+	// NF_NotCsg (0x01) makes the node transparent: it does not turn the back
+	// leaf solid, so no region is produced.
+	payload := build_model_payload()
+	// 12 prelude + 28 bounds + (8 + 4*12) Vectors + (8 + 4*12) Points + 8 nodes
+	// header + 55 bytes into the node record.
+	flags_offset := 12 + 28 + (8 + 4 * 12) + (8 + 4 * 12) + 8 + 55
+	payload[flags_offset] = 0x01
+	data := build_single_model_package(payload[:])
+	pkg, d := parse(data[:])
+	defer delete(d.items)
+	model, m_diags := read_model(&pkg, 0)
+	defer delete(m_diags.items)
+	testing.expect_value(t, model.nodes[0].flags, u8(0x01))
+	testing.expect_value(t, len(model_solids(&model)), 0)
+}

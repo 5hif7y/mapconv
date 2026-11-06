@@ -123,6 +123,7 @@ inspect_text :: proc(pkg: ^Package, path: string) -> string {
 	model_surfs := 0
 	model_verts := 0
 	model_poly_count := 0
+	model_solid_count := 0
 	model_errors := 0
 	for e, i in pkg.exports {
 		if export_class_name(pkg, e) != "Model" {
@@ -140,6 +141,10 @@ inspect_text :: proc(pkg: ^Package, path: string) -> string {
 		model_verts += len(m.verts)
 		polys := model_polygons(&m)
 		model_poly_count += len(polys)
+		if outer_is_level(pkg, e) {
+			solids := model_solids(&m)
+			model_solid_count += len(solids)
+		}
 	}
 
 	if polys_objects > 0 {
@@ -166,6 +171,9 @@ inspect_text :: proc(pkg: ^Package, path: string) -> string {
 			model_verts,
 			model_poly_count,
 		)
+		if model_solid_count > 0 {
+			fmt.sbprintf(&b, ", %d solid region(s)", model_solid_count)
+		}
 		if model_errors > 0 {
 			fmt.sbprintf(&b, ", %d model(s) failed to parse", model_errors)
 		}

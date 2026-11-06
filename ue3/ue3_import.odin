@@ -34,6 +34,10 @@ import_document :: proc(data: []u8, source_path: string) -> (doc: ir.Document, d
 	brushes := 0
 	polygons := 0
 	degraded := 0
+	// UPolys exports that produced brushes. A level model whose Polys is among
+	// them already contributed its geometry; reconstructing its BSP on top would
+	// duplicate it.
+	converted_polys := make(map[int]bool, 32)
 	for e, i in pkg.exports {
 		if export_class_name(&pkg, e) != "Polys" {
 			continue
@@ -69,6 +73,55 @@ import_document :: proc(data: []u8, source_path: string) -> (doc: ir.Document, d
 		brush_index := ir.add_brush(&doc, brush)
 		append(&doc.world.brushes, brush_index)
 		brushes += 1
+		converted_polys[i] = true
+	}
+
+	// Level BSP models: reconstruct convex solid regions from the node tree.
+	// Brush models are skipped because their UPolys was already converted.
+	bsp_models := 0
+	bsp_solids := 0
+	bsp_faces := 0
+	for e, i in pkg.exports {
+		if export_class_name(&pkg, e) != "Model" || !outer_is_level(&pkg, e) {
+			continue
+		}
+		model, model_d := read_model(&pkg, i)
+		merge(&d, &model_d)
+		if diag.has_errors(&model_d) {
+			continue
+		}
+		if model.polys_index > 0 && converted_polys[int(model.polys_index) - 1] {
+			continue
+		}
+		solids := model_solids(&model)
+		if len(solids) == 0 {
+			continue
+		}
+		bsp_models += 1
+		for solid, solid_index in solids {
+			brush, faces := solid_brush(&pkg, &model, solid, i, solid_index)
+			if faces < 4 {
+				continue
+			}
+			brush_index := ir.add_brush(&doc, brush)
+			append(&doc.world.brushes, brush_index)
+			bsp_solids += 1
+			bsp_faces += faces
+			brushes += 1
+		}
+	}
+	if bsp_solids > 0 {
+		diag.info(
+			&d,
+			"ue3.bsp-solids",
+			fmt.aprintf(
+				"reconstructed %d solid region(s), %d face(s) from %d level BSP model(s)",
+				bsp_solids,
+				bsp_faces,
+				bsp_models,
+			),
+			source_path,
+		)
 	}
 
 	doc.world.id = "1"
@@ -77,19 +130,19 @@ import_document :: proc(data: []u8, source_path: string) -> (doc: ir.Document, d
 		diag.err(
 			&d,
 			"ue3.no-brush-geometry",
-			"the package has no readable brush polygons; the level model and actors are not converted yet",
+			"the package has no readable brush polygons and no reconstructible BSP solids; actors and materials are not converted yet",
 			source_path,
 		)
 		return
 	}
+	summary := fmt.aprintf("converted %d brush(es): %d UPolys face(s)", brushes, polygons)
+	if bsp_solids > 0 {
+		summary = fmt.aprintf("%s, %d BSP face(s) from %d solid region(s)", summary, bsp_faces, bsp_solids)
+	}
 	diag.info(
 		&d,
-		"ue3.brush-volumes-only",
-		fmt.aprintf(
-			"converted %d brush volume(s), %d polygon face(s); the level BSP model, actors and materials are not converted yet",
-			brushes,
-			polygons,
-		),
+		"ue3.converted",
+		fmt.aprintf("%s; actors and materials are not converted yet", summary),
 		source_path,
 	)
 	if degraded > 0 {
@@ -101,6 +154,121 @@ import_document :: proc(data: []u8, source_path: string) -> (doc: ir.Document, d
 		)
 	}
 	return
+}
+
+// outer_is_level reports whether the export's outer is a Level export.
+outer_is_level :: proc(pkg: ^Package, e: Export) -> bool {
+	if package_index_kind(e.outer_index) != .Export {
+		return false
+	}
+	index := int(e.outer_index) - 1
+	if index < 0 || index >= len(pkg.exports) {
+		return false
+	}
+	return export_class_name(pkg, pkg.exports[index]) == "Level"
+}
+
+// solid_brush turns one reconstructed BSP region into an IR brush: every plane
+// becomes a face whose winding is the plane clipped by the other planes, with
+// the material and texture vectors of the BSP node that produced it.
+solid_brush :: proc(
+	pkg: ^Package,
+	model: ^Model,
+	solid: Bsp_Solid,
+	model_export: int,
+	solid_index: int,
+) -> (brush: ir.Brush, faces: int) {
+	brush = ir.make_brush(fmt.aprintf("ue3.bsp.%d.%d", model_export, solid_index), .Add)
+	if len(solid.planes) < 4 {
+		return
+	}
+	planes := make([]geom.Plane, len(solid.planes))
+	defer delete(planes)
+	points := make([]geom.Vec3, len(solid.planes))
+	defer delete(points)
+	for entry, i in solid.planes {
+		normal := geom.Vec3{f64(entry.plane.normal.x), f64(entry.plane.normal.y), f64(entry.plane.normal.z)}
+		length := geom.length(normal)
+		if length < 1e-9 {
+			return
+		}
+		normal = geom.mul(normal, 1 / length)
+		planes[i] = geom.Plane{normal = normal, dist = f64(entry.plane.dist) / length}
+		points[i] = geom.plane_origin(planes[i])
+	}
+	bounds := geom.aabb_from_points(points)
+	center := geom.aabb_center(bounds)
+	radius := 0.0
+	for p in points {
+		radius = max(radius, geom.length(geom.sub(p, center)))
+	}
+	bounds = geom.aabb_expand(bounds, radius + 64)
+
+	for plane, i in planes {
+		winding := geom.brush_face_winding(planes, i, bounds)
+		if len(winding) < 3 {
+			delete(winding)
+			continue
+		}
+		material: string
+		uv: ir.TexProjection
+		flags: u32
+		node_index := solid.planes[i].node_index
+		if node_index >= 0 && node_index < len(model.nodes) {
+			surf_index := model.nodes[node_index].i_surf
+			if surf_index >= 0 && int(surf_index) < len(model.surfs) {
+				surf := model.surfs[surf_index]
+				material = package_index_name(pkg, surf.material)
+				uv = uv_from_bsp_surf(model, surf)
+				flags = surf.poly_flags
+			}
+		}
+		if material == "" {
+			material = "TOOLS/NODRAW"
+		}
+		face := ir.make_face(plane, uv, material)
+		face.flags = flags
+		for v in winding {
+			append(&face.winding, v)
+		}
+		delete(winding)
+		append(&brush.faces, face)
+		faces += 1
+	}
+	return
+}
+
+// uv_from_bsp_surf maps a BSP surface to an IR projection. Unlike FPoly.Base,
+// FBspSurf.pBase indexes the model's Points table, so the base really is a world
+// point and the projection is exact. UE3 texels are dot(p - base, TextureU).
+uv_from_bsp_surf :: proc(model: ^Model, surf: Bsp_Surf) -> ir.TexProjection {
+	uv := ir.default_tex_projection()
+	if surf.p_base < 0 || int(surf.p_base) >= len(model.points) {
+		return uv
+	}
+	if surf.v_texture_u < 0 || int(surf.v_texture_u) >= len(model.vectors) {
+		return uv
+	}
+	if surf.v_texture_v < 0 || int(surf.v_texture_v) >= len(model.vectors) {
+		return uv
+	}
+	base := model.points[surf.p_base]
+	u := model.vectors[surf.v_texture_u]
+	v := model.vectors[surf.v_texture_v]
+	base3 := geom.Vec3{f64(base.x), f64(base.y), f64(base.z)}
+	u3 := geom.Vec3{f64(u.x), f64(u.y), f64(u.z)}
+	v3 := geom.Vec3{f64(v.x), f64(v.y), f64(v.z)}
+	if lu := geom.length(u3); lu > 1e-9 {
+		uv.u = geom.mul(u3, 1 / lu)
+		uv.u_scale = 1 / lu
+		uv.u_offset = -geom.dot(base3, u3)
+	}
+	if lv := geom.length(v3); lv > 1e-9 {
+		uv.v = geom.mul(v3, 1 / lv)
+		uv.v_scale = 1 / lv
+		uv.v_offset = -geom.dot(base3, v3)
+	}
+	return uv
 }
 
 // face_from_poly turns one FPoly into an IR face. The stored normal is
