@@ -123,6 +123,9 @@ entity id, `world.solid[3].side[2]`) and a source location for parsed text.
 | `ue3.tags-overrun`, `ue3.bad-property-size` | the property tag stream or one of its values does not fit the export |
 | `ue3.bad-polys`, `ue3.bad-poly` | implausible `UPolys`/`FPoly` counts |
 | `ue3.polys-size-mismatch` | the polygons do not consume the declared `SerialSize`; the layout is suspect |
+| `ue3.polys-degenerate` | a `UPolys` produced fewer than four usable faces and was skipped |
+| `ue3.no-brush-geometry` | the package has no readable `UPolys` geometry; nothing can be written |
+| `ue3.brush-volumes-only` | summary of what was converted when the level model, actors and materials are still pending |
 
 ### `convert.*`
 

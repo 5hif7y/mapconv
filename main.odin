@@ -200,16 +200,6 @@ run_convert :: proc(args: Args, text: string) {
 	if source == .Unknown {
 		source, _ = convert.detect_format(args.input, text)
 	}
-	if source == .UE3_Package {
-		d := diag.init()
-		diag.err(
-			&d,
-			"ue3.convert-unsupported",
-			"UE3 package import is not implemented yet; `mapconv inspect` reads the package tables",
-		)
-		print_diagnostics(&d, false, args.report)
-		os.exit(1)
-	}
 	if target == .UE3_Package {
 		fmt.eprintln("mapconv: UE3 packages are not an output format; write a .t3d for UnrealEd instead")
 		os.exit(2)

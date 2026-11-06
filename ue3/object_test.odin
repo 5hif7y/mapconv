@@ -1,8 +1,10 @@
 package ue3
 
+import "core:math"
 import "core:strings"
 import "core:testing"
 import "../diag"
+import "../geom"
 
 // The object-level tests reuse the byte builder from ue3_test.odin and add two
 // export payloads after the depends table:
@@ -249,4 +251,169 @@ test_polys_size_mismatch_is_reported :: proc(t: ^testing.T) {
 	_, set_d := read_polys(&pkg, 0)
 	defer delete(set_d.items)
 	testing.expect_value(t, diag.count(&set_d, .Warning), 1)
+}
+
+// build_single_polys_package wraps one UPolys payload in a minimal 576/5 package
+// with a single export of class Polys, so the importer can be tested end to end.
+build_single_polys_package :: proc(payload: []u8) -> [dynamic]u8 {
+	names_buf: [dynamic]u8
+	nb := Builder{buf = names_buf}
+	for text in ([]string{"None", "Class", "Package", "Engine", "Polys", "Polys_0"}) {
+		put_name_entry(&nb, text, 0)
+	}
+	names_buf = nb.buf
+
+	imports_buf: [dynamic]u8
+	ib := Builder{buf = imports_buf}
+	put_name_ref(&ib, 2, 0)
+	put_name_ref(&ib, 1, 0)
+	put_i32(&ib, 0)
+	put_name_ref(&ib, 3, 0)
+	put_name_ref(&ib, 2, 0)
+	put_name_ref(&ib, 1, 0)
+	put_i32(&ib, -1)
+	put_name_ref(&ib, 4, 0)
+	imports_buf = ib.buf
+
+	header_fixed := 4 + 4 + 4 + 4 + 4 + 28 + 16 + 4 + 12 + 4 + 4 + 4 + 4 + 4 + 4
+	import_offset := header_fixed + len(names_buf)
+	export_offset := import_offset + len(imports_buf)
+	payload_offset := export_offset + 68
+	depends_offset := payload_offset + len(payload)
+
+	exports_buf: [dynamic]u8
+	eb := Builder{buf = exports_buf}
+	put_i32(&eb, -2) // class = import 1 (Polys)
+	put_i32(&eb, 0)
+	put_i32(&eb, 0)
+	put_name_ref(&eb, 5, 0) // Polys_0
+	put_i32(&eb, 0)
+	put_u64(&eb, 0)
+	put_i32(&eb, i32(len(payload)))
+	put_i32(&eb, i32(payload_offset))
+	put_u32(&eb, 0)
+	put_i32(&eb, 0)
+	put_guid(&eb)
+	put_u32(&eb, 0)
+	exports_buf = eb.buf
+
+	out: [dynamic]u8
+	h := Builder{buf = out}
+	put_u32(&h, PACKAGE_FILE_TAG)
+	put_u32(&h, 0x00050240)
+	put_i32(&h, i32(header_fixed))
+	put_fstring(&h, "")
+	put_u32(&h, PKG_COOKED)
+	put_i32(&h, 6) // names
+	put_i32(&h, i32(header_fixed))
+	put_i32(&h, 1) // exports
+	put_i32(&h, i32(export_offset))
+	put_i32(&h, 2) // imports
+	put_i32(&h, i32(import_offset))
+	put_i32(&h, i32(depends_offset))
+	put_guid(&h)
+	put_i32(&h, 1)
+	put_i32(&h, 1)
+	put_i32(&h, 6)
+	put_i32(&h, 0)
+	put_i32(&h, 4701)
+	put_i32(&h, 87)
+	put_u32(&h, 0)
+	put_i32(&h, 0)
+	put_i32(&h, 0)
+	put_i32(&h, 0) // additional packages
+	append(&h.buf, ..names_buf[:])
+	append(&h.buf, ..imports_buf[:])
+	append(&h.buf, ..exports_buf[:])
+	append(&h.buf, ..payload)
+	return h.buf
+}
+
+put_poly :: proc(b: ^Builder, verts: []Vec3, normal, u, v: Vec3) {
+	// Base is stored in brush-local space; the importer must not use it.
+	put_vec3(b, 0, 0, 0)
+	put_vec3(b, normal.x, normal.y, normal.z)
+	put_vec3(b, u.x, u.y, u.z)
+	put_vec3(b, v.x, v.y, v.z)
+	put_i32(b, i32(len(verts)))
+	for vert in verts {
+		put_vec3(b, vert.x, vert.y, vert.z)
+	}
+	put_u32(b, 1) // PolyFlags
+	put_i32(b, 0) // Actor
+	put_i32(b, 0) // ItemName
+	put_i32(b, 0)
+	put_i32(b, 0) // Material
+	put_i32(b, -1) // iLink
+	put_i32(b, 0) // iBrushPoly
+	put_f32(b, 1) // ShadowMapScale
+	put_u32(b, 1) // LightingChannels
+}
+
+build_cube_payload :: proc() -> [dynamic]u8 {
+	p := Builder{}
+	put_i32(&p, 3) // NetIndex
+	put_i32(&p, 0) // "None"
+	put_i32(&p, 0)
+	put_i32(&p, 6) // Num
+	put_i32(&p, 6) // Max
+	put_i32(&p, 1) // Owner = self
+
+	u := Vec3{1, 0, 0}
+	v := Vec3{0, 1, 0}
+	put_poly(&p, []Vec3{{32, -32, -32}, {32, 32, -32}, {32, 32, 32}, {32, -32, 32}}, Vec3{1, 0, 0}, u, v)
+	put_poly(&p, []Vec3{{-32, -32, -32}, {-32, -32, 32}, {-32, 32, 32}, {-32, 32, -32}}, Vec3{-1, 0, 0}, u, v)
+	put_poly(&p, []Vec3{{-32, 32, -32}, {-32, 32, 32}, {32, 32, 32}, {32, 32, -32}}, Vec3{0, 1, 0}, u, v)
+	put_poly(&p, []Vec3{{-32, -32, -32}, {32, -32, -32}, {32, -32, 32}, {-32, -32, 32}}, Vec3{0, -1, 0}, u, v)
+	put_poly(&p, []Vec3{{-32, -32, 32}, {32, -32, 32}, {32, 32, 32}, {-32, 32, 32}}, Vec3{0, 0, 1}, u, v)
+	put_poly(&p, []Vec3{{-32, -32, -32}, {-32, 32, -32}, {32, 32, -32}, {32, -32, -32}}, Vec3{0, 0, -1}, u, v)
+	return p.buf
+}
+
+@(test)
+test_import_cube_brush :: proc(t: ^testing.T) {
+	payload := build_cube_payload()
+	data := build_single_polys_package(payload[:])
+	pkg, d := parse(data[:])
+	defer delete(d.items)
+	testing.expect_value(t, diag.count(&d, .Error), 0)
+
+	doc, import_d := import_document(data[:], "cube.ccmap")
+	defer delete(import_d.items)
+	testing.expect_value(t, diag.count(&import_d, .Error), 0)
+	testing.expect_value(t, len(doc.brushes), 1)
+	testing.expect_value(t, len(doc.world.brushes), 1)
+	testing.expect_value(t, doc.world.class_name, "worldspawn")
+	brush := doc.brushes[0]
+	testing.expect_value(t, len(brush.faces), 6)
+	for face in brush.faces {
+		testing.expect_value(t, len(face.winding), 4)
+		testing.expect(t, math.abs(face.plane.dist - 32) < 1e-4)
+		testing.expect_value(t, face.material, "TOOLS/NODRAW")
+		testing.expect(t, face.winding_source == .Authored)
+		// The plane must contain its own winding.
+		for point in face.winding {
+			testing.expect(t, math.abs(geom.dot(face.plane.normal, point) - face.plane.dist) < 1e-4)
+		}
+	}
+	if len(doc.brushes) == 1 {
+		_ = pkg
+	}
+}
+
+@(test)
+test_import_degenerate_polys_reports_error :: proc(t: ^testing.T) {
+	// One triangle: not a brush, so the import must fail with a clear diagnostic.
+	p := Builder{}
+	put_i32(&p, 4)
+	put_i32(&p, 0)
+	put_i32(&p, 0)
+	put_i32(&p, 1)
+	put_i32(&p, 1)
+	put_i32(&p, 1)
+	put_poly(&p, []Vec3{{0, 0, 0}, {64, 0, 0}, {0, 64, 0}}, Vec3{0, 0, 1}, Vec3{1, 0, 0}, Vec3{0, 1, 0})
+	data := build_single_polys_package(p.buf[:])
+	_, d := import_document(data[:], "tri.ccmap")
+	defer delete(d.items)
+	testing.expect_value(t, diag.count(&d, .Error), 1)
 }

@@ -213,13 +213,23 @@ Brush volumes (`BlockingVolume` and subclasses) own two objects: a `Model` and a
 `LightmassSettings` (version ≥ 600) and the rule-set pointer/variation name
 (≥ 606 / ≥ 670) are absent in 576 and are not read.
 
+`FPoly.Base` is stored in **brush-local space** and keeps the brush's creation
+size: in `villyard` the largest `|Base|` is 1024 while the winding vertices reach
+6144 after scaling. The winding is world space and agrees with `Normal`
+(`FPoly::CalcNormal` uses the same cross-product convention), so the plane
+distance must be taken from a winding vertex, not from `Base`. Texture offsets
+anchored at `Base` are approximate until the owning actor's transform is
+converted.
+
 Verification: all 368 `UPolys` objects in `EntryLevel`, `villyard`,
 `City05_HQ` and `City_Bau` parse exactly to their declared `SerialSize`
 (`villyard` alone: 3 199 polygons, 14 726 vertices). A size mismatch is
 reported as `ue3.polys-size-mismatch`, which is how a wrong `FPoly` layout
 would surface.
 
-`mapconv inspect` prints the totals ("brush polys: 362 UPolys object(s) …").
+`mapconv inspect` prints the totals ("brush polys: 362 UPolys object(s) …") and
+`mapconv convert --input map.ccmap --output map.vmf` emits one world brush per
+`UPolys` object (villyard: 361 brushes, 3199 faces, 1.1 MB VMF in 0.4 s).
 
 ## What is not implemented yet
 

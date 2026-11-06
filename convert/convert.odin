@@ -14,6 +14,7 @@ import "../geom"
 import "../ir"
 import "../profile"
 import "../t3d"
+import "../ue3"
 import "../vmf"
 import "../xform"
 
@@ -111,7 +112,7 @@ has_package_tag :: proc(contents: string) -> bool {
 SUPPORTED_FORMATS :: []ir.Format{ir.Format.Source_VMF, ir.Format.Source_BSP, ir.Format.Unreal_T3D}
 
 is_supported :: proc(f: ir.Format) -> bool {
-	return f == .Source_VMF || f == .Source_BSP || f == .Unreal_T3D
+	return f == .Source_VMF || f == .Source_BSP || f == .Unreal_T3D || f == .UE3_Package
 }
 
 // Compiled formats are import-only: mapconv does not contain a BSP compiler.
@@ -156,6 +157,8 @@ import_only :: proc(data: []u8, source_path: string, opts: Options) -> (ir.Docum
 		return bsp.import_document(data, source_path)
 	case .Unreal_T3D:
 		return t3d.import_document(contents, source_path)
+	case .UE3_Package:
+		return ue3.import_document(data, source_path)
 	case:
 		diag.err(&d, "convert.unsupported-source", ir.concat("no importer for format ", ir.format_name(format)), source_path)
 		doc := ir.init_document(.Unknown, xform.source_1())
@@ -213,6 +216,8 @@ convert_bytes :: proc(data: []u8, source_path: string, opts: Options) -> Result 
 		res.doc, res.diagnostics = bsp.import_document(data, source_path)
 	case .Unreal_T3D:
 		res.doc, res.diagnostics = t3d.import_document(contents, source_path)
+	case .UE3_Package:
+		res.doc, res.diagnostics = ue3.import_document(data, source_path)
 	case:
 		return res
 	}
