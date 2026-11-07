@@ -104,7 +104,7 @@ write a reader before a layout consumes the export exactly.
 | Step | Field | Size |
 | --- | --- | ---: |
 | 1 | `Bounds` (FBoxSphereBounds: 2×FVector + FLOAT) | 28 |
-| 2 | `Materials` | 4 + 16·N (measured: 2 materials = 32 B) |
+| 2 | `Materials` | 4 + 4·N (2 materials = 8 B; verified at +377..+385) |
 | 3 | `Origin`, `RotOrigin` | 12 + 12 |
 | 4 | `RefSkeleton` | 4 + 52·N |
 | 5 | `SkeletalDepth` | 4 |
@@ -113,9 +113,13 @@ write a reader before a layout consumes the export exactly.
 
 `FStaticLODModel::Serialize` (Engine/Src/UnSkeletalMesh.cpp:1350):
 
-1. `Sections` — `TArray<FSkelMeshSection>`; each is 13 B in 576
-   (`WORD Material, WORD Chunk, DWORD BaseIndex, DWORD NumTriangles, BYTE Sorting`).
-2. `MultiSizeIndexContainer` (`DataType` + index bulk).
+1. `Sections` — `TArray<FSkelMeshSection>`; each is **10 B** in 576:
+   `WORD Material, WORD Chunk, DWORD BaseIndex, WORD NumTriangles` (no sorting
+   byte below `VER_SKELETAL_MESH_SORTING_OPTIONS`). Verified on export 82:
+   sections at +3126 (count 2), +3130 `(0,0,0,4990)`, +3140 `(1,1,14970,3075)`.
+2. `MultiSizeIndexContainer`: for 576 the header is `u32 DataTypeSize (=2)`
+   followed by `u32 NumIndices` and `NumIndices × WORD` (measured: 2, 24195 at
+   +3150), then the index words.
 3. `ActiveBoneIndices` (`TArray<WORD>`).
 4. `Chunks` (`TArray<FSkelMeshChunk>`).
 5. `Size`, `NumVertices`.
