@@ -74,3 +74,14 @@ test_encode_header_layout :: proc(t: ^testing.T) {
 	testing.expect_value(t, u16(encoded[16]) | u16(encoded[17]) << 8, u16(4))
 	testing.expect_value(t, u16(encoded[18]) | u16(encoded[19]) << 8, u16(4))
 }
+
+@(test)
+test_encode_header_depth :: proc(t: ^testing.T) {
+	mip := [8]u8{0, 0xf8, 0, 0, 0x1f, 0, 0, 0}
+	encoded, ok := encode(4, 4, IMAGE_FORMAT_DXT1, [][]u8{mip[:]})
+	testing.expect(t, ok)
+	defer delete(encoded)
+	// 7.2 header: depth is a u16 at offset 63; zero depth makes the engine
+	// reject the file with "Error reading texture header".
+	testing.expect_value(t, u16(encoded[63]) | u16(encoded[64]) << 8, u16(1))
+}

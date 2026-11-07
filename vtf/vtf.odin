@@ -183,7 +183,8 @@ encode :: proc(width, height: int, format: u32, mips: [][]u8) -> (out: []u8, ok:
 	append_u32(&buf, 0x3f800000) // bump scale 1.0
 	append_u32(&buf, format)
 	append(&buf, u8(keep), 0xff, 0xff, 0xff, 0xff) // mip count, low-res none
-	append(&buf, 0, 0) // low-res size
+	append(&buf, 0, 0) // low-res width/height
+	append(&buf, 1, 0) // depth
 	for len(buf) < 80 { append(&buf, 0) }
 	for i := keep - 1; i >= 0; i -= 1 {
 		append(&buf, ..mips[i])
