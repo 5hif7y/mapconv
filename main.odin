@@ -363,6 +363,43 @@ merge_diags :: proc(dst: ^diag.Diagnostics, src: ^diag.Diagnostics) {
 
 // run_extract writes every readable texture of a UE3 package as a DDS file.
 // Streamed mips (texture file cache) and unsupported formats are reported.
+
+// write_texture_vtf emits a VTF next to the DDS using the largest inline run of
+// mips. Full chains (an *_art package) produce full-resolution textures.
+write_texture_vtf :: proc(texture: ^ue3.Texture, output, name: string) {
+	first := 0
+	for first < len(texture.mips) && len(texture.mips[first].data) == 0 {
+		first += 1
+	}
+	if first >= len(texture.mips) {
+		return
+	}
+	count := 0
+	for mip in texture.mips[first:] {
+		if len(mip.data) == 0 {
+			break
+		}
+		count += 1
+	}
+	code: u32 = 0
+	switch texture.format {
+	case "PF_DXT1": code = vtf.IMAGE_FORMAT_DXT1
+	case "PF_DXT3": code = vtf.IMAGE_FORMAT_DXT3
+	case "PF_DXT5": code = vtf.IMAGE_FORMAT_DXT5
+	case "PF_A8R8G8B8": code = vtf.IMAGE_FORMAT_BGRA8888
+	}
+	if code == 0 || count == 0 {
+		return
+	}
+	run := make([][]u8, count)
+	for m, k in texture.mips[first:first+count] {
+		run[k] = m.data
+	}
+	if encoded, ok := vtf.encode(int(texture.mips[first].width), int(texture.mips[first].height), code, run); ok {
+		_ = os.write_entire_file(fmt.aprintf("%s/%s.vtf", output, name), encoded)
+	}
+}
+
 run_extract :: proc(args: Args, text: string) {
 	lower_input := strings.to_lower(args.input)
 	if strings.has_suffix(lower_input, ".dds") {
@@ -460,30 +497,57 @@ run_extract :: proc(args: Args, text: string) {
 			os.exit(2)
 		}
 		written += 1
-		// Also write a VTF when the inline mip run is complete, so Source can use
-		// the texture without a second conversion pass.
-		first := 0
-		for first < len(texture.mips) && len(texture.mips[first].data) == 0 { first += 1 }
-		if first < len(texture.mips) {
-			count := 0
-			for mip in texture.mips[first:] { if len(mip.data) == 0 { break }; count += 1 }
-			code: u32 = 0
-			switch texture.format {
-			case "PF_DXT1": code = vtf.IMAGE_FORMAT_DXT1
-			case "PF_DXT3": code = vtf.IMAGE_FORMAT_DXT3
-			case "PF_DXT5": code = vtf.IMAGE_FORMAT_DXT5
-			case "PF_A8R8G8B8": code = vtf.IMAGE_FORMAT_BGRA8888
-			}
-			if code != 0 && count > 0 {
-				run := make([][]u8, count)
-				for m, k in texture.mips[first:first+count] { run[k] = m.data }
-				if encoded, enc_ok := vtf.encode(int(texture.mips[first].width), int(texture.mips[first].height), code, run); enc_ok {
-					vpath := fmt.aprintf("%s/%s.vtf", args.output, name)
-					_ = os.write_entire_file(vpath, encoded)
+		write_texture_vtf(&texture, args.output, name)
+	}
+	// Sky and tool materials ship inside the game VPK, not in UE3 content. When
+	// the package carries cubemap faces, publish them as a 2D skybox so the
+	// worldspawn skyname resolves, and give the seal shell a real tool material.
+	sky_names := [6]string{"rt", "lf", "bk", "ft", "up", "dn"}
+	_ = os.make_directory_all(fmt.aprintf("%s/materials/skybox", args.output))
+	for name, i in sky_names {
+		body := fmt.aprintf("\"UnlitGeneric\"\n{\n\t\"$basetexture\" \"CubemapFace%d\"\n\t\"$nofog\" \"1\"\n\t\"$ignorez\" \"1\"\n}\n", i)
+		path := fmt.aprintf("%s/materials/skybox/sky_day01_01%s.vmt", args.output, name)
+		_ = os.write_entire_file(path, transmute([]u8)body)
+		delete(path)
+		delete(body)
+	}
+	_ = os.make_directory_all(fmt.aprintf("%s/materials/tools", args.output))
+	for name in ([]string{"toolsskybox", "toolsnodraw", "toolsinvisible"}) {
+		body := fmt.aprintf("\"UnlitGeneric\"\n{\n\t\"$basetexture\" \"CubemapFace0\"\n\t\"$model\" \"1\"\n}\n")
+		path := fmt.aprintf("%s/materials/tools/%s.vmt", args.output, name)
+		_ = os.write_entire_file(path, transmute([]u8)body)
+		delete(path)
+		delete(body)
+	}
+
+	// Streamed mips live in the sibling <map>_art.ccpk. When it is available in
+	// the content tree, re-extract those textures so the files carry the full
+	// mip chain (decoded from the UE3 compressed bulk blocks).
+	if args.content != "" {
+		stem := filepath.stem(args.input)
+		cand := fmt.aprintf("%s/Packages/Instance/%s_art.ccpk", args.content, stem)
+		defer delete(cand)
+		if data, err := os.read_entire_file(cand, context.allocator); err == nil {
+			art, art_d := ue3.parse(data)
+			if !diag.has_errors(&art_d) {
+				for e, i in art.exports {
+					if ue3.export_class_name(&art, e) != "Texture2D" {
+						continue
+					}
+					tex, td := ue3.read_texture(&art, i)
+					if diag.has_errors(&td) {
+						continue
+					}
+					name := ue3.name_text(&art, e.object_name)
+					if bytes, ok := ue3.dds_bytes(&tex); ok {
+						_ = os.write_entire_file(fmt.aprintf("%s/%s.dds", args.output, name), bytes)
+						write_texture_vtf(&tex, args.output, name)
+					}
 				}
 			}
 		}
 	}
+
 	// Referenced meshes: the map only stores imports; with --content, follow the
 	// import chain to the content package, then write OBJ (every LOD), an SMD and
 	// a QC for the LOD 0 so studiomdl can produce the .mdl the VMF references.

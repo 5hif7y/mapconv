@@ -21,8 +21,8 @@ MAPCONV=${MAPCONV:-./mapconv}
 
 if [ -n "${CONTENT:-}" ]; then
 	"$MAPCONV" extract --input "$MAP" --content "$CONTENT" --output "$WORK/assets"
-	mkdir -p "$CSSO/csso/materials/mapconv"
-	cp "$WORK"/assets/materials/mapconv/*.vmt "$CSSO/csso/materials/mapconv/" 2>/dev/null || true
+	mkdir -p "$CSSO/csso/materials"
+	cp -r "$WORK"/assets/materials/* "$CSSO/csso/materials/" 2>/dev/null || true
 	cp "$WORK"/assets/*.vtf "$CSSO/csso/materials/" 2>/dev/null || true
 	for qc in "$WORK"/assets/"$NAME"/*.qc; do
 		[ -f "$qc" ] || continue
