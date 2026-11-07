@@ -343,6 +343,25 @@ inspect_text :: proc(pkg: ^Package, path: string) -> string {
 		}
 	}
 
+
+	shown_component := 0
+	for e in pkg.exports {
+		if export_class_name(pkg, e) != "StaticMeshComponent" || shown_component >= 1 {
+			continue
+		}
+		head, hd := read_object_head(pkg, e)
+		if !diag.has_errors(&hd) {
+			fmt.sbprintf(&b, "component %s size %d body %d end %d:\n", name_text(pkg, e.object_name), e.serial_size, head.body_offset - int(e.serial_offset), head.end_offset - int(e.serial_offset))
+			n := min(64, head.end_offset - head.body_offset)
+			for k in 0..<n {
+				fmt.sbprintf(&b, " %02x", pkg.data[head.body_offset + k])
+			}
+			strings.write_byte(&b, '\n')
+			shown_component += 1
+		}
+		delete(hd.items)
+	}
+
 	shown_texture := 0
 	for e, i in pkg.exports {
 		if export_class_name(pkg, e) != "Texture2D" || shown_texture >= 2 {
