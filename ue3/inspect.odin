@@ -353,7 +353,7 @@ inspect_text :: proc(pkg: ^Package, path: string) -> string {
 			fmt.sbprintf(&b, "texture %s %dx%d %s mips %d cache '%s' file %d bytes:\n", name_text(pkg, e.object_name), tex.width, tex.height, tex.format, len(tex.mips), tex.cache_name, len(pkg.data))
 			for mip, k in tex.mips {
 				if k >= 4 { break }
-				fmt.sbprintf(&b, "  mip %d %dx%d flags 0x%x size %d offset %d inline %d\n", k, mip.width, mip.height, mip.flags, mip.size, mip.offset, len(mip.data))
+				fmt.sbprintf(&b, "  mip %d %dx%d flags 0x%x raw %d size %d offset %d inline %d\n", k, mip.width, mip.height, mip.flags, mip.uncompressed, mip.size, mip.offset, len(mip.data))
 			}
 			shown_texture += 1
 		}

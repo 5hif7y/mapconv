@@ -25,6 +25,7 @@ Bulk_Header :: struct {
 Texture_Mip :: struct {
 	width:  i32,
 	height: i32,
+	uncompressed: i32,
 	// Inline mip bytes. Empty when the mip lives in a separate file.
 	data:   []u8,
 	flags:  u32,
@@ -120,9 +121,10 @@ read_texture :: proc(
 			return
 		}
 		mip := Texture_Mip {
-			flags  = bulk.flags,
-			offset = bulk.offset,
-			size   = bulk.size,
+			flags        = bulk.flags,
+			offset       = bulk.offset,
+			size         = bulk.size,
+			uncompressed = bulk.count,
 		}
 		if bulk.flags & BULKDATA_STORE_IN_SEPARATE_FILE != 0 {
 			texture.streamed += 1
