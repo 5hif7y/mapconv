@@ -366,6 +366,96 @@ merge_diags :: proc(dst: ^diag.Diagnostics, src: ^diag.Diagnostics) {
 
 // write_texture_vtf emits a VTF next to the DDS using the largest inline run of
 // mips. Full chains (an *_art package) produce full-resolution textures.
+
+// resolve_missing_basetextures rewrites VMTs whose $basetexture has no VTF in the
+// extracted set. UE3 materials can reference FX textures that live in packages
+// the map does not pull in; pointing them at an existing texture keeps the
+// surface textured instead of showing the engine's missing-material checker.
+resolve_missing_basetextures :: proc(output: string) -> (rewritten: int) {
+	entries, err := os.read_directory_by_path(output, -1, context.allocator)
+	if err != nil {
+		return 0
+	}
+	defer delete(entries)
+	textures := make([dynamic]string, 0, 64)
+	defer delete(textures)
+	for e in entries {
+		if strings.has_suffix(strings.to_lower(e.name), ".vtf") {
+			append(&textures, e.name[:len(e.name) - 4])
+		}
+	}
+	if len(textures) == 0 {
+		return 0
+	}
+	dir := fmt.aprintf("%s/materials/mapconv", output)
+	defer delete(dir)
+	mt, mt_err := os.read_directory_by_path(dir, -1, context.allocator)
+	if mt_err != nil {
+		return 0
+	}
+	defer delete(mt)
+	for e in mt {
+		name := e.name
+		if !strings.has_suffix(strings.to_lower(name), ".vmt") {
+			continue
+		}
+		path := fmt.aprintf("%s/%s", dir, name)
+		data, read_err := os.read_entire_file(path, context.allocator)
+		if read_err != nil {
+			delete(path)
+			continue
+		}
+		text := string(data)
+		lines := strings.split(text, "\n")
+		changed := false
+		for line, i in lines {
+			if !strings.contains(line, "\"$basetexture\"") {
+				continue
+			}
+			// Skip the key token, then read the value token: line is
+			//   "$basetexture" "<name>"
+			first := strings.index(line, "\"")
+			if first < 0 {
+				continue
+			}
+			after_key := line[first+1:]
+			key_end := strings.index(after_key, "\"")
+			if key_end < 0 {
+				continue
+			}
+			after := after_key[key_end+1:]
+			value_start := strings.index(after, "\"")
+			if value_start < 0 {
+				continue
+			}
+			value_rest := after[value_start+1:]
+			value_end := strings.index(value_rest, "\"")
+			if value_end < 0 {
+				continue
+			}
+			tex := value_rest[:value_end]
+			probe := fmt.aprintf("%s/%s.vtf", output, tex)
+			_, stat_err := os.stat(probe, context.allocator)
+			delete(probe)
+			if stat_err == nil {
+				continue
+			}
+			lines[i] = fmt.aprintf("\t\"$basetexture\" \"%s\"", textures[0])
+			changed = true
+			rewritten += 1
+		}
+		if changed {
+			joined := strings.join(lines, "\n")
+			_ = os.write_entire_file(path, transmute([]u8)joined)
+			delete(joined)
+		}
+		delete(lines)
+		delete(data)
+		delete(path)
+	}
+	return rewritten
+}
+
 write_texture_vtf :: proc(texture: ^ue3.Texture, output, name: string) {
 	first := 0
 	for first < len(texture.mips) && len(texture.mips[first].data) == 0 {
@@ -698,6 +788,11 @@ run_extract :: proc(args: Args, text: string) {
 		delete(qc)
 		delete(model_path)
 		ue3.static_mesh_destroy(&mesh)
+	}
+
+	texture_fallbacks := resolve_missing_basetextures(args.output)
+	if texture_fallbacks > 0 {
+		diag.warn(&diagnostics, "ue3.texture-fallback", fmt.aprintf("%d VMT basetexture(s) had no VTF and now point at an extracted texture", texture_fallbacks), args.input)
 	}
 
 	fmt.printfln(

@@ -175,24 +175,15 @@ convert_text :: proc(contents, source_path: string, opts: Options) -> Result {
 // hollow skybox shell (six slabs) around the converted bounds: a solid box
 // would fill the playable space instead of enclosing it.
 seal_world :: proc(doc: ^ir.Document, pad: f64) {
-	lo := geom.Vec3{1e30, 1e30, 1e30}
-	hi := geom.Vec3{-1e30, -1e30, -1e30}
-	for &b in doc.brushes {
-		for &f in b.faces {
-			for v in f.winding {
-				lo.x = min(lo.x, v.x); lo.y = min(lo.y, v.y); lo.z = min(lo.z, v.z)
-				hi.x = max(hi.x, v.x); hi.y = max(hi.y, v.y); hi.z = max(hi.z, v.z)
-			}
-		}
-	}
-	for &e in doc.entities {
-		lo.x = min(lo.x, e.origin.x); lo.y = min(lo.y, e.origin.y); lo.z = min(lo.z, e.origin.z)
-		hi.x = max(hi.x, e.origin.x); hi.y = max(hi.y, e.origin.y); hi.z = max(hi.z, e.origin.z)
-	}
-	if lo.x > hi.x {
-		lo = geom.Vec3{-4096, -4096, -4096}
-		hi = geom.Vec3{4096, 4096, 4096}
-	}
+	// UE3 levels place most geometry in static meshes, whose extents are not in
+	// the brush windings or the actor origins. Sizing the shell from those alone
+	// lets it cut through meshes, which shows up as flat surfaces slicing the
+	// map. Source's world is limited to +/-16384, so a fixed shell that encloses
+	// that volume is always safe.
+	half: f64 = 15000
+	lo := geom.Vec3{-half, -half, -half}
+	hi := geom.Vec3{half, half, half}
+
 	add_box :: proc(doc: ^ir.Document, a, b: geom.Vec3) {
 		brush := ir.Brush{id = fmt.aprintf("mapconv-seal-%d", len(doc.brushes)), op = .Add}
 		brush.faces = make([dynamic]ir.Face, 0, 6)
