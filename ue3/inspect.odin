@@ -354,8 +354,29 @@ inspect_text :: proc(pkg: ^Package, path: string) -> string {
 			best_size = int(e.serial_size)
 		}
 	}
-	if best >= 0 {
+	for pass in 0..<2 {
 		e := pkg.exports[best]
+		if pass == 1 {
+			for cand, i in pkg.exports {
+				if export_class_name(pkg, cand) == "StaticMeshComponent" && cand.serial_size > 0 && int(cand.serial_size) < int(e.serial_size) {
+					e = cand
+					best = i
+				}
+			}
+			// second pass: smallest non-empty component instead of the largest
+			small := -1
+			small_size := 1 << 30
+			for cand, i in pkg.exports {
+				if export_class_name(pkg, cand) == "StaticMeshComponent" && cand.serial_size > 260 && int(cand.serial_size) < small_size {
+					small = i
+					small_size = int(cand.serial_size)
+				}
+			}
+			if small < 0 {
+				continue
+			}
+			e = pkg.exports[small]
+		}
 		head, hd := read_object_head(pkg, e)
 		if !diag.has_errors(&hd) {
 			fmt.sbprintf(&b, "component %s offset %d size %d body %d end %d:\n", name_text(pkg, e.object_name), e.serial_offset, e.serial_size, head.body_offset - int(e.serial_offset), head.end_offset - int(e.serial_offset))
