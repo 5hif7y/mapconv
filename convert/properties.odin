@@ -35,6 +35,12 @@ map_entity_properties :: proc(doc: ^ir.Document, prof: profile.Profile, target: 
 		has_light_color := false
 		light_brightness: f64
 		has_light_brightness := false
+		light_radius: f64
+		has_light_radius := false
+		inner_cone: f64
+		has_inner_cone := false
+		outer_cone: f64
+		has_outer_cone := false
 
 		for property in entity.props {
 			rule, has_rule := profile.property_rule(prof, property.key)
@@ -70,6 +76,23 @@ map_entity_properties :: proc(doc: ^ir.Document, prof: profile.Profile, target: 
 					has_light_brightness = true
 				} else {
 					diag.warn(dg, "convert.light-value-invalid", "could not parse _light; the property was dropped", entity.id)
+				}
+			case .Unreal_Light_Shape:
+				value, value_ok := strconv.parse_f64(strings.trim_space(property_text(property)))
+				if !value_ok {
+					diag.warn(dg, "convert.light-shape-invalid", "could not parse light shape value", entity.id)
+					continue
+				}
+				switch strings.to_lower(property.key) {
+				case "attenuationradius":
+					light_radius = value
+					has_light_radius = true
+				case "innerconeangle":
+					inner_cone = value
+					has_inner_cone = true
+				case "outerconeangle":
+					outer_cone = value
+					has_outer_cone = true
 				}
 			case .Unreal_Light:
 				switch strings.to_lower(property.key) {
@@ -191,6 +214,21 @@ map_entity_properties :: proc(doc: ^ir.Document, prof: profile.Profile, target: 
 					),
 					entity.id,
 				)
+			}
+		}
+
+		if target == .Source_VMF && (has_light_radius || has_inner_cone || has_outer_cone) {
+			// Unreal stores the attenuation radius in centimetres and the cone
+			// angles in radians; Source wants units and degrees.
+			CM_TO_UNITS :: 0.3937007874
+			if has_light_radius && light_radius > 0 {
+				ir.push_property(&remaining, "_distance", fmt.aprintf("%.0f", light_radius * CM_TO_UNITS))
+			}
+			if has_outer_cone && outer_cone > 0 {
+				ir.push_property(&remaining, "_cone", fmt.aprintf("%.1f", outer_cone * 180.0 / 3.141592653589793))
+			}
+			if has_inner_cone && inner_cone > 0 {
+				ir.push_property(&remaining, "_inner_cone", fmt.aprintf("%.1f", inner_cone * 180.0 / 3.141592653589793))
 			}
 		}
 

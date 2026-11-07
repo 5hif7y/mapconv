@@ -27,6 +27,8 @@ Property_Op :: enum {
 	Unreal_Rotation,
 	// An asset reference that cannot be resolved; reported and dropped.
 	Asset_Reference,
+	// Unreal light shape (radius, cone angles) -> Source light keys.
+	Unreal_Light_Shape,
 }
 
 Property_Rule :: struct {
@@ -125,6 +127,9 @@ SOURCE_TO_UNREAL_PROPERTIES :: []Property_Rule {
 UNREAL_TO_SOURCE_PROPERTIES :: []Property_Rule {
 	{"brightness", .Unreal_Light, "", "Unreal brightness re-expressed on the Source 0..2000 scale"},
 	{"lightcolor", .Unreal_Light, "", "colour mapped exactly"},
+	{"attenuationradius", .Unreal_Light_Shape, "_distance", "radius in centimetres converted to Source units"},
+	{"innerconeangle", .Unreal_Light_Shape, "_inner_cone", "radians converted to degrees"},
+	{"outerconeangle", .Unreal_Light_Shape, "_cone", "radians converted to degrees"},
 	{"rotation", .Unreal_Rotation, "", "Unreal rotator converted to Source angles"},
 	{"tag", .Copy, "targetname", "the name is preserved; no I/O relationship is created"},
 	{"staticmesh", .Copy, "model", "the static mesh asset is not converted; the path is kept"},

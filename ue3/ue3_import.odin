@@ -149,6 +149,15 @@ import_document :: proc(data: []u8, source_path: string) -> (doc: ir.Document, d
 					if info.has_brightness {
 						ir.push_property(&light.props, "brightness", fmt.aprintf("%g", info.brightness))
 					}
+					if info.has_radius {
+						ir.push_property(&light.props, "AttenuationRadius", f64(info.radius))
+					}
+					if info.has_inner_cone {
+						ir.push_property(&light.props, "InnerConeAngle", f64(info.inner_cone))
+					}
+					if info.has_outer_cone {
+						ir.push_property(&light.props, "OuterConeAngle", f64(info.outer_cone))
+					}
 					if info.has_light_color {
 						c := info.light_color
 						ir.push_property(

@@ -32,6 +32,12 @@ Actor_Info :: struct {
 	light_color:     [4]u8, // FColor is stored B, G, R, A
 	has_brightness:  bool,
 	has_light_color: bool,
+	radius:          f32,
+	inner_cone:      f32, // radians, as Unreal stores it
+	outer_cone:      f32,
+	has_radius:      bool,
+	has_inner_cone:  bool,
+	has_outer_cone:  bool,
 }
 
 read_actor_info :: proc(
@@ -118,6 +124,24 @@ read_light_properties :: proc(pkg: ^Package, tags: []Property_Tag, info: ^Actor_
 		if value, ok2 := tag_f32(pkg, tag); ok2 {
 			info.brightness = value
 			info.has_brightness = true
+		}
+	}
+	if tag, ok := find_tag(pkg, tags, "AttenuationRadius"); ok {
+		if value, ok2 := tag_f32(pkg, tag); ok2 && value > 0 {
+			info.radius = value
+			info.has_radius = true
+		}
+	}
+	if tag, ok := find_tag(pkg, tags, "InnerConeAngle"); ok {
+		if value, ok2 := tag_f32(pkg, tag); ok2 && value > 0 {
+			info.inner_cone = value
+			info.has_inner_cone = true
+		}
+	}
+	if tag, ok := find_tag(pkg, tags, "OuterConeAngle"); ok {
+		if value, ok2 := tag_f32(pkg, tag); ok2 && value > 0 {
+			info.outer_cone = value
+			info.has_outer_cone = true
 		}
 	}
 	if tag, ok := find_tag(pkg, tags, "LightColor"); ok {

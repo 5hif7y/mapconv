@@ -59,3 +59,37 @@ be added with provenance and redistribution permission recorded here.
 - resource/asset resolution,
 - CLI end-to-end tests (the CLI is exercised manually; see the examples in
   `README.md`).
+
+## In-engine validation (not yet satisfactory)
+
+Automated runs under WSL start the game and capture the desktop with PowerShell,
+but the results so far are **not conclusive**:
+
+- some captures show the loading screen only (large maps take minutes);
+- one run reached the map (HUD, warmup) but the window later disappeared before
+  the next capture;
+- textures/geometry changes could not be judged from those frames, so in-engine
+  verification is considered **pending**, not passing.
+
+### What the next harness must do
+
+1. Enter **spectator/noclip** so the camera can be placed deterministically:
+   ```
+   csso_win64.exe -game csso -novid -windowed -w 1280 -h 720 \
+     +sv_cheats 1 +map arena01 +noclip
+   ```
+   then in the console (or via `+` commands):
+   ```
+   cl_showpos 1          // prints "pos x y z; ang ..." every frame
+   spec_mode 1           // free look once dead/spectating
+   setpos -1200 800 320  // chosen viewpoint
+   ```
+2. Add `-condebug` so `csso/console.log` records the `cl_showpos` lines; parse the
+   last `pos` line to know exactly where the camera ended up.
+3. Take the screenshot only after the log shows the map's `Level` loaded (search
+   for the map name and the absence of `Loading` lines), not on a fixed sleep.
+4. Store the chosen `(pos, ang)` pairs per map in a small JSON fixture so a run is
+   reproducible and diffs between runs are meaningful.
+
+Until that harness exists, treat in-engine screenshots as exploratory evidence
+only; the byte/asset audits in `AUDIT.md` are the authoritative measurements.
