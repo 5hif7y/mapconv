@@ -358,6 +358,24 @@ inspect_text :: proc(pkg: ^Package, path: string) -> string {
 			for k in 0..<n {
 				fmt.sbprintf(&b, " %02x", pkg.data[head.body_offset + k])
 			}
+			// The first body i32 is the StaticMesh package index. If it resolves
+			// to a mesh in this package, compare its vertex count with the size
+			// of the trailing 4-byte array (body - 20 bytes, in elements).
+			r := Reader{data = pkg.data, pos = head.body_offset}
+			ref := read_i32(&r)
+			if ref > 0 && int(ref)-1 < len(pkg.exports) {
+				me := pkg.exports[int(ref)-1]
+				cls := export_class_name(pkg, me)
+				fmt.sbprintf(&b, "  ref=%d export=%d class=%s", ref, int(ref)-1, cls)
+				if cls == "StaticMesh" {
+					mesh, md := read_static_mesh(pkg, int(ref)-1)
+					if !diag.has_errors(&md) && len(mesh.lods) > 0 {
+						elems := (int(e.serial_size) - (head.body_offset - int(e.serial_offset)) - 20) / 4
+						fmt.sbprintf(&b, " verts=%d elems=%d match=%v", mesh.lods[0].num_vertices, elems, elems == int(mesh.lods[0].num_vertices))
+					}
+					delete(md.items)
+				}
+			}
 			strings.write_byte(&b, '\n')
 		}
 		delete(hd.items)
