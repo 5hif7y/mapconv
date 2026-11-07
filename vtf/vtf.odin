@@ -191,3 +191,54 @@ encode :: proc(width, height: int, format: u32, mips: [][]u8) -> (out: []u8, ok:
 	}
 	return buf[:], true
 }
+
+// from_dds reads a DDS file and returns the mip chain a VTF needs. UModel
+// exports a single, full-resolution mip, which is enough for Source: the engine
+// builds the rest. Supports DXT1/3/5 and BGRA8.
+from_dds :: proc(data: []u8) -> (width, height: int, format: u32, mips: [][]u8, ok: bool) {
+	if len(data) < 128 || data[0] != 'D' || data[1] != 'D' || data[2] != 'S' || data[3] != ' ' {
+		return
+	}
+	h := int(read_u32(data, 12))
+	w := int(read_u32(data, 16))
+	if w <= 0 || h <= 0 {
+		return
+	}
+	count := int(read_u32(data, 28))
+	if count == 0 {
+		count = 1
+	}
+	block := 0
+	switch {
+	case data[84]=='D' && data[85]=='X' && data[86]=='T' && data[87]=='1':
+		format, block = IMAGE_FORMAT_DXT1, 8
+	case data[84]=='D' && data[85]=='X' && data[86]=='T' && data[87]=='3':
+		format, block = IMAGE_FORMAT_DXT3, 16
+	case data[84]=='D' && data[85]=='X' && data[86]=='T' && data[87]=='5':
+		format, block = IMAGE_FORMAT_DXT5, 16
+	case:
+		return
+	}
+	mips = make([][]u8, count)
+	pos := 128
+	for i in 0..<count {
+		mw := max(1, w >> uint(i))
+		mh := max(1, h >> uint(i))
+		size := max(1, (mw + 3) / 4) * max(1, (mh + 3) / 4) * block
+		if pos + size > len(data) {
+			// Truncated chain: keep what is available as a single mip.
+			if i == 0 {
+				return
+			}
+			mips = mips[:i]
+			break
+		}
+		mips[i] = data[pos:pos + size]
+		pos += size
+	}
+	return w, h, format, mips, true
+}
+
+read_u32 :: proc(data: []u8, at: int) -> u32 {
+	return u32(data[at]) | u32(data[at+1]) << 8 | u32(data[at+2]) << 16 | u32(data[at+3]) << 24
+}

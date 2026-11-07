@@ -365,6 +365,30 @@ merge_diags :: proc(dst: ^diag.Diagnostics, src: ^diag.Diagnostics) {
 // Streamed mips (texture file cache) and unsupported formats are reported.
 run_extract :: proc(args: Args, text: string) {
 	lower_input := strings.to_lower(args.input)
+	if strings.has_suffix(lower_input, ".dds") {
+		w, h, format, mips, ok := vtf.from_dds(transmute([]u8)text)
+		if !ok {
+			fmt.eprintfln("mapconv: cannot read %q as DDS (DXT1/3/5 only)", args.input)
+			os.exit(1)
+		}
+		if err := os.make_directory_all(args.output); err != nil {
+			fmt.eprintfln("mapconv: cannot create %q", args.output)
+			os.exit(2)
+		}
+		encoded, enc_ok := vtf.encode(w, h, format, mips)
+		if !enc_ok {
+			fmt.eprintfln("mapconv: cannot encode %q as VTF", args.input)
+			os.exit(1)
+		}
+		base := filepath.stem(args.input)
+		path := fmt.aprintf("%s/%s.vtf", args.output, base)
+		if os.write_entire_file(path, encoded) != nil {
+			fmt.eprintfln("mapconv: cannot write %q", path)
+			os.exit(2)
+		}
+		fmt.printfln("wrote %s (%dx%d, %d bytes)", path, w, h, len(encoded))
+		return
+	}
 	if strings.has_suffix(lower_input, ".vtf") {
 		diagnostics := diag.init()
 		dds, format_name, ok := vtf.to_dds(transmute([]u8)text, &diagnostics)
