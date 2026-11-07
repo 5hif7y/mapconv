@@ -96,6 +96,48 @@ Next: derive the component layout from `UnSkeletalComponent.cpp` (same family,
 same `LODData` idea) or from a UE3 build that ships `StaticMesh.cpp`. Do not
 write a reader before a layout consumes the export exactly.
 
+
+## SkeletalMesh implementation notes (measured/source-backed)
+
+`USkeletalMesh::Serialize` after tags, with `LICENSEE == 5` and version 576:
+
+| Step | Field | Size |
+| --- | --- | ---: |
+| 1 | `Bounds` (FBoxSphereBounds: 2×FVector + FLOAT) | 28 |
+| 2 | `Materials` | 4 + 16·N (measured: 2 materials = 32 B) |
+| 3 | `Origin`, `RotOrigin` | 12 + 12 |
+| 4 | `RefSkeleton` | 4 + 52·N |
+| 5 | `SkeletalDepth` | 4 |
+| 6 | Vogster byte (`Ver < 592 && Licensee == 5`) | 1 |
+| 7 | `LODModels` | FStaticLODModel[] |
+
+`FStaticLODModel::Serialize` (Engine/Src/UnSkeletalMesh.cpp:1350):
+
+1. `Sections` — `TArray<FSkelMeshSection>`; each is 13 B in 576
+   (`WORD Material, WORD Chunk, DWORD BaseIndex, DWORD NumTriangles, BYTE Sorting`).
+2. `MultiSizeIndexContainer` (`DataType` + index bulk).
+3. `ActiveBoneIndices` (`TArray<WORD>`).
+4. `Chunks` (`TArray<FSkelMeshChunk>`).
+5. `Size`, `NumVertices`.
+6. `RequiredBones` (`TArray<BYTE>`).
+7. `RawPointIndices` (FBulkData).
+8. `NumTexCoords` then `VertexBufferGPUSkin` (stride depends on `NumTexCoords`;
+   `FRigidSkinVertex` 61 B / `FSoftSkinVertex` 68 B with 4 UVs per the source
+   comments).
+9. `ColorVertexBuffer` only when the tags say `bHasVertexColors`.
+10. `VertexInfluences` (≥ `VER_ADDED_EXTRA_SKELMESH_VERTEX_INFLUENCES`).
+
+After `LODModels`: `NameIndexMap`, `PerPolyBoneKDOPs`, `BoneBreakNames` and
+`BoneBreakOptions` (gated). The Vogster byte and the vertex stride are the two
+places where a wrong guess shifts everything, so the reader must consume the
+export exactly and refuse otherwise.
+
+Measured example: `CH_MNPCguard01_lobby` (export 82 of
+`Characters_Male_combocloth.ccpk` at 9130843) — tags end +345, `Bounds` +345,
+`Materials` count +373 (=2), `RefSkeleton` count +409 (=52, 52×52 B), last
+`BoneColor` = FFFFFFFF at +3117, `SkeletalDepth` +3117 (=12), Vogster byte
++3121, `LODModels` count +3122 (=2), sections +3126.
+
 ### 5. `Level` — 3.2 MB, 0.1 %, source `UnLevel.cpp`
 
 Our reader consumes only 12 B of a 1.5 MB `Level` in arena01. The class is not a
