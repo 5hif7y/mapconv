@@ -341,6 +341,17 @@ convert_bytes :: proc(data: []u8, source_path: string, opts: Options) -> Result 
 	}
 
 	if res.target_format == .Source_VMF {
+		// vbsp resolves skybox materials from worldspawn's skyname; UE3 maps
+		// carry no such key, so pick a sky that ships with the destination.
+		has_sky := false
+		for prop in res.doc.world.props {
+			if prop.key == "skyname" {
+				has_sky = true
+			}
+		}
+		if !has_sky {
+			append(&res.doc.world.props, ir.Property{key = "skyname", value = "sky_day01_01", raw = "sky_day01_01"})
+		}
 		seal_world(&res.doc, 1024)
 	}
 
