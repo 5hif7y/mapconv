@@ -343,5 +343,22 @@ inspect_text :: proc(pkg: ^Package, path: string) -> string {
 		}
 	}
 
+	shown_texture := 0
+	for e, i in pkg.exports {
+		if export_class_name(pkg, e) != "Texture2D" || shown_texture >= 2 {
+			continue
+		}
+		tex, td := read_texture(pkg, i)
+		if !diag.has_errors(&td) {
+			fmt.sbprintf(&b, "texture %s %dx%d %s mips %d cache '%s' file %d bytes:\n", name_text(pkg, e.object_name), tex.width, tex.height, tex.format, len(tex.mips), tex.cache_name, len(pkg.data))
+			for mip, k in tex.mips {
+				if k >= 4 { break }
+				fmt.sbprintf(&b, "  mip %d %dx%d flags 0x%x size %d offset %d inline %d\n", k, mip.width, mip.height, mip.flags, mip.size, mip.offset, len(mip.data))
+			}
+			shown_texture += 1
+		}
+		delete(td.items)
+	}
+
 	return strings.to_string(b)
 }
