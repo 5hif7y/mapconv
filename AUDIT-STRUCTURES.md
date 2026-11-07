@@ -97,6 +97,40 @@ same `LODData` idea) or from a UE3 build that ships `StaticMesh.cpp`. Do not
 write a reader before a layout consumes the export exactly.
 
 
+
+### Measured LOD0 chain (export 82, `CH_MNPCguard01_lobby`)
+
+| Step | Offset | Value |
+| --- | ---: | --- |
+| tags end | 345 | — |
+| `Bounds` | 345 | 7 floats |
+| `Materials` | 373 | 2 × 4 B |
+| `Origin` / `RotOrigin` | 385 | (0, 0, −43) + 12 B |
+| `RefSkeleton` | 409 | 52 × 52 B |
+| `SkeletalDepth` | 3117 | 12 |
+| Vogster byte | 3121 | 0 |
+| `LODModels` | 3122 | 2 |
+| `Sections` | 3126 | 2 × 10 B: (0,0,0,4990), (1,1,14970,3075) |
+| index container | 3150 | `DataTypeSize=2`, `NumIndices=24195`, 24195 × WORD |
+| shadow indices | 51548 | 24195 × WORD |
+| `ActiveBoneIndices` | 99942 | 43 × WORD |
+| shadow double-sided | 100032 | 8065 × BYTE |
+| `Chunks` | 108101 | 2 chunks |
+| chunk 0 | 108105 | base 0, rigid 4136 × **61 B**, soft 2587 × **68 B**, bones 42 × WORD, NumRigid 4136, NumSoft 2587, MaxBone 4 |
+| chunk 1 | 536433 | base 6723, rigid 4779 × 61 B, soft 0, bones 1, NumRigid 4779, NumSoft 0, MaxBone 1 |
+| `Size` / `NumVertices` | 827978 | 0 / 11502 (rigid+soft sums match) |
+| `LegacyEdges` | 827986 | 12514 × **16 B** |
+| `RequiredBones` | 1028218 | 52 × BYTE |
+| `RawPointIndices` | 1028270 | flags 0, count 11502, size 23004, offset 10159129; data inline |
+| `VertexBufferGPUSkin` | 1051290 | bUseFullPrecisionUVs=0, **stride 48**, NumVertices 11502, 552,096 B of data |
+
+The chunk vertex arrays confirm the 61/68 byte vertex sizes (the trailing
+NumRigid/NumSoft/MaxBone triples line up exactly). After the LOD0 vertex data
+the next bytes are not a clean LOD1 header yet, so the LOD0 tail
+(`ColorVertexBuffer` when the tags say `bHasVertexColors`, `VertexInfluences`,
+or a bulk with a different header) still needs one more measurement before the
+reader can be written end to end.
+
 ## SkeletalMesh implementation notes (measured/source-backed)
 
 `USkeletalMesh::Serialize` after tags, with `LICENSEE == 5` and version 576:
