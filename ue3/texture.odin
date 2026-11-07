@@ -14,6 +14,7 @@ import "../diag"
 
 BULKDATA_STORE_IN_SEPARATE_FILE :: 0x01
 BULKDATA_UNUSED :: 0x20
+BULKDATA_COMPRESSED :: 0x10
 
 Bulk_Header :: struct {
 	flags:  u32,
@@ -56,6 +57,64 @@ read_bulk_data_header :: proc(r: ^Reader) -> (Bulk_Header, bool) {
 		return {}, false
 	}
 	return h, true
+}
+
+
+// decompress_mip decodes a UE3 compressed bulk block: an FCompressedChunkHeader
+// (tag, block size, total sizes, per-block sizes) followed by LZO streams.
+decompress_mip :: proc(src: []u8, expected: int) -> ([]u8, bool) {
+	if len(src) < 16 || expected <= 0 {
+		return nil, false
+	}
+	pos := 0
+	tag := u32(src[0]) | u32(src[1]) << 8 | u32(src[2]) << 16 | u32(src[3]) << 24
+	if tag == 0x9E2A83C1 {
+		pos = 4
+	}
+	if pos + 12 > len(src) {
+		return nil, false
+	}
+	block_size := int(i32(u32(src[pos]) | u32(src[pos+1]) << 8 | u32(src[pos+2]) << 16 | u32(src[pos+3]) << 24))
+	pos += 4
+	if block_size <= 0 {
+		block_size = 0x20000
+	}
+	sum_comp := int(i32(u32(src[pos]) | u32(src[pos+1]) << 8 | u32(src[pos+2]) << 16 | u32(src[pos+3]) << 24))
+	pos += 4
+	sum_uncomp := int(i32(u32(src[pos]) | u32(src[pos+1]) << 8 | u32(src[pos+2]) << 16 | u32(src[pos+3]) << 24))
+	pos += 4
+	if sum_uncomp != expected {
+		return nil, false
+	}
+
+	out := make([]u8, expected, context.allocator)
+	op := 0
+	seen_comp := 0
+	seen_uncomp := 0
+	for seen_comp < sum_comp && seen_uncomp < sum_uncomp {
+		if pos + 8 > len(src) {
+			return nil, false
+		}
+		block_comp := int(i32(u32(src[pos]) | u32(src[pos+1]) << 8 | u32(src[pos+2]) << 16 | u32(src[pos+3]) << 24))
+		pos += 4
+		block_uncomp := int(i32(u32(src[pos]) | u32(src[pos+1]) << 8 | u32(src[pos+2]) << 16 | u32(src[pos+3]) << 24))
+		pos += 4
+		if block_comp <= 0 || block_uncomp <= 0 || pos + block_comp > len(src) || op + block_uncomp > expected {
+			return nil, false
+		}
+		n, ok := lzo1x_decompress(src[pos:pos+block_comp], out[op:op+block_uncomp])
+		if !ok || n != block_uncomp {
+			return nil, false
+		}
+		pos += block_comp
+		op += block_uncomp
+		seen_comp += block_comp
+		seen_uncomp += block_uncomp
+	}
+	if op != expected {
+		return nil, false
+	}
+	return out, true
 }
 
 read_texture :: proc(
@@ -135,6 +194,11 @@ read_texture :: proc(
 			}
 			mip.data = pkg.data[r.pos:r.pos + int(bulk.size)]
 			r.pos += int(bulk.size)
+			if bulk.flags & BULKDATA_COMPRESSED != 0 {
+				if decoded, decoded_ok := decompress_mip(mip.data, int(bulk.count)); decoded_ok {
+					mip.data = decoded
+				}
+			}
 		}
 		mip.width = read_i32(&r)
 		mip.height = read_i32(&r)
