@@ -13,8 +13,8 @@ Current state:
 
 | Metric | Bytes | % |
 | --- | ---: | ---: |
-| Interpreted | 3,372,367,056 | 63.30 |
-| Uninterpreted | 1,955,434,628 | 36.70 |
+| Interpreted | 3,562,510,342 | 66.87 |
+| Uninterpreted | 1,765,291,342 | 33.13 |
 | Streamed mips (`*_art.ccpk`) | 3,455,440,074 | decodable, outside these files |
 
 ## Priority by uninterpreted bytes
@@ -26,7 +26,7 @@ Current state:
 | `SkeletalMesh` | 756,693,429 | 757,058,326 | 0.0 % | 20 | `Engine/Src/UnSkeletalMesh.cpp` |
 | `StaticMeshComponent` | 709,401,800 | 723,039,376 | 1.9 % | 142 | **no source** |
 | `AnimSequence` | 199,966,404 | 213,339,252 | 6.3 % | 24 | `Engine/Src/UnSkeletalAnim.cpp` |
-| `SoundNodeWave` | 190,143,286 | 191,429,414 | 0.7 % | 142 | `Engine/Src/UnAudioNodes.cpp` |
+| `SoundNodeWave` | 0 | 191,429,414 | 100.0 % | 142 | done (`ue3/sound.odin`) |
 | `DecalComponent` | 12,843,596 | 13,456,116 | 4.6 % | 31 | `Engine/Src/DecalComponent.cpp` |
 | `SpeedTreeComponent` | 11,102,672 | 11,294,824 | 1.7 % | 18 | licensed, stripped |
 | `BrushComponent` | 5,276,289 | 9,166,529 | 42.4 % | 129 | `Engine/Src/...` partial |
@@ -43,8 +43,8 @@ uninterpreted.
 
 | Step | Cumulative | % |
 | --- | ---: | ---: |
-| Current | 3,372,367,056 | 63.30 |
-| + `SoundNodeWave` | 3,562,510,342 | 66.87 |
+| Current (after SoundNodeWave) | 3,562,510,342 | 66.87 |
+
 | + `AnimSequence` | 3,762,476,746 | 70.62 |
 | + `SkeletalMesh` | 4,519,170,175 | 84.82 |
 | + `Level`, `Decal`, `Brush`, tails | ~4,545,000,000 | ~85.3 |

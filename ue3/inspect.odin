@@ -344,6 +344,28 @@ inspect_text :: proc(pkg: ^Package, path: string) -> string {
 	}
 
 
+	// Sound payloads: NetIndex and tags, then the FBulkData members.
+	shown_sounds := 0
+	for e in pkg.exports {
+		if export_class_name(pkg, e) != "SoundNodeWave" || e.serial_size < 5000 {
+			continue
+		}
+		head, hd := read_object_head(pkg, e)
+		if !diag.has_errors(&hd) {
+			fmt.sbprintf(&b, "sound %s offset %d size %d body %d end %d:", name_text(pkg, e.object_name), e.serial_offset, e.serial_size, head.body_offset - int(e.serial_offset), head.end_offset - int(e.serial_offset))
+			n := min(64, head.end_offset - head.body_offset)
+			for k in 0..<n {
+				fmt.sbprintf(&b, " %02x", pkg.data[head.body_offset + k])
+			}
+			strings.write_byte(&b, '\n')
+		}
+		delete(hd.items)
+		shown_sounds += 1
+		if shown_sounds >= 2 {
+			break
+		}
+	}
+
 	// Prefixes of the largest components: the second field after the LOD count
 	// is either a stride (constant) or an element count (size-dependent).
 	printed_components := 0

@@ -103,6 +103,12 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 			}
 			delete(texture.mips)
 			delete(texture_d.items)
+		case "SoundNodeWave":
+			_, sound_d := read_sound_node_wave(pkg, index, allocator)
+			if !diag.has_errors(&sound_d) {
+				interpreted = i64(e.serial_size)
+			}
+			delete(sound_d.items)
 		case "Level":
 			// The level reader covers the actor list and URL; the rest of the
 			// payload (components, sequences) stays uninterpreted.
