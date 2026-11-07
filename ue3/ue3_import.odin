@@ -11,6 +11,7 @@
 package ue3
 
 import "core:fmt"
+import "core:strings"
 import "core:path/filepath"
 import "../diag"
 import "../geom"
@@ -118,6 +119,7 @@ import_document :: proc(data: []u8, source_path: string) -> (doc: ir.Document, d
 	// StaticMeshActor into prop_static for Source targets.
 	actors_total := 0
 	mesh_entities := 0
+	helper_meshes := 0
 	light_entities := 0
 	for e, i in pkg.exports {
 		if export_class_name(&pkg, e) != "Level" {
@@ -160,6 +162,15 @@ import_document :: proc(data: []u8, source_path: string) -> (doc: ir.Document, d
 				}
 				continue
 			}
+			// Collision-only and light-volume meshes are mapper helpers: they have
+			// no place in a playable Source map (collision comes from the BSP and
+			// models, and light shafts need sprites, not opaque cones).
+			mesh_lower := strings.to_lower(info.mesh_name)
+			if strings.contains(mesh_lower, "collision") || strings.contains(mesh_lower, "lightbeam") ||
+			   strings.contains(mesh_lower, "light_beam") || strings.contains(mesh_lower, "volume") {
+				helper_meshes += 1
+				continue
+			}
 			entity := ir.make_entity("", info.class_name)
 			set_actor_transform(&entity, info)
 			owner := info.mesh_package
@@ -171,6 +182,15 @@ import_document :: proc(data: []u8, source_path: string) -> (doc: ir.Document, d
 			mesh_entities += 1
 		}
 	}
+	if helper_meshes > 0 {
+		diag.info(
+			&d,
+			"ue3.helper-meshes",
+			fmt.aprintf("skipped %d collision/light-volume mesh(es)", helper_meshes),
+			source_path,
+		)
+	}
+
 	if actors_total > 0 {
 		diag.info(
 			&d,
