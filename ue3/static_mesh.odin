@@ -462,11 +462,17 @@ static_mesh_smd :: proc(mesh: ^Static_Mesh, lod_index: int) -> string {
 		a := int(lod.indices[i])
 		bb := int(lod.indices[i + 1])
 		c := int(lod.indices[i + 2])
-		material := "mapconv/unknown"
+		// SMD material names are relative to $cdmaterials, so a name that
+		// already carries a package path would be looked up twice.
+		material := "unknown"
 		for section in lod.sections {
 			if i >= int(section.first_index) && i < int(section.first_index) + int(section.num_triangles) * 3 {
-				if section.material_name != "" {
-					material = section.material_name
+				name := section.material_name
+				if idx := strings.last_index_byte(name, '/'); idx >= 0 {
+					name = name[idx + 1:]
+				}
+				if name != "" {
+					material = name
 				}
 				break
 			}
