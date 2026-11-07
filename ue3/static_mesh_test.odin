@@ -3,6 +3,7 @@ package ue3
 import "core:strings"
 import "core:testing"
 import "../diag"
+import "../xform"
 
 // Synthetic StaticMesh package: one LOD with three positions and one triangle.
 // The layout follows the 576 legacy path documented in static_mesh.odin; the
@@ -197,7 +198,7 @@ test_read_static_mesh :: proc(t: ^testing.T) {
 	// The test mesh has no material reference, so the name stays empty.
 	testing.expect_value(t, lod.sections[0].material_name, "")
 
-	obj := static_mesh_obj(&mesh, 0)
+	obj := static_mesh_obj(&mesh, 0, mesh_transform())
 	defer delete(obj)
 	testing.expect(t, strings.contains(obj, "f 1/1 2/2 3/3"))
 	static_mesh_destroy(&mesh)
@@ -219,4 +220,9 @@ test_import_package :: proc(t: ^testing.T) {
 	testing.expect_value(t, package_name, "Engine")
 	testing.expect_value(t, object_name, "StaticMesh")
 	testing.expect_value(t, ascii_lower("EngineMeshes"), "enginemeshes")
+}
+
+mesh_transform :: proc() -> xform.Transform {
+	t, _ := xform.transform_between(xform.unreal_3(), xform.source_1())
+	return t
 }

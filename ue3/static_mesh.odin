@@ -23,7 +23,9 @@ package ue3
 
 import "core:fmt"
 import "core:strings"
+import "../xform"
 import "../diag"
+import "../geom"
 
 // Version gates used by the static mesh reader (Core/Inc/UnObjVer.h).
 VER_REMOVED_LEGACY_CONTENT_TAGS :: 593
@@ -381,9 +383,12 @@ static_mesh_destroy :: proc(mesh: ^Static_Mesh) {
 	mesh.lods = nil
 }
 
+to_geom :: proc(v: Vec3) -> geom.Vec3 { return geom.Vec3{f64(v.x), f64(v.y), f64(v.z)} }
+to_ue :: proc(v: geom.Vec3) -> Vec3 { return Vec3{f32(v.x), f32(v.y), f32(v.z)} }
+
 // static_mesh_obj renders one LOD as Wavefront OBJ in Unreal coordinates
 // (X forward, Y right, Z up). Indices are emitted one-based as OBJ requires.
-static_mesh_obj :: proc(mesh: ^Static_Mesh, lod_index: int) -> string {
+static_mesh_obj :: proc(mesh: ^Static_Mesh, lod_index: int, t: xform.Transform) -> string {
 	if lod_index < 0 || lod_index >= len(mesh.lods) {
 		return ""
 	}
@@ -392,7 +397,8 @@ static_mesh_obj :: proc(mesh: ^Static_Mesh, lod_index: int) -> string {
 	fmt.sbprintf(&b, "# %s LOD %d\n", mesh.name, lod_index)
 	fmt.sbprintf(&b, "# vertices %d, triangles %d\n", len(lod.positions), len(lod.indices) / 3)
 	fmt.sbprintf(&b, "o %s_L%d\n", mesh.name, lod_index)
-	for p in lod.positions {
+	for position in lod.positions {
+		p := to_ue(xform.apply_point(t, to_geom(position)))
 		fmt.sbprintf(&b, "v %.6f %.6f %.6f\n", p.x, p.y, p.z)
 	}
 	has_uv := len(lod.uvs) == len(lod.positions)
@@ -450,7 +456,7 @@ sqrt_f32 :: proc(v: f32) -> f32 {
 
 // static_mesh_smd renders one LOD as a StudioMDL reference mesh: one material
 // per section, flat face normals and UV set 0.
-static_mesh_smd :: proc(mesh: ^Static_Mesh, lod_index: int) -> string {
+static_mesh_smd :: proc(mesh: ^Static_Mesh, lod_index: int, t: xform.Transform) -> string {
 	if lod_index < 0 || lod_index >= len(mesh.lods) {
 		return ""
 	}
@@ -477,13 +483,13 @@ static_mesh_smd :: proc(mesh: ^Static_Mesh, lod_index: int) -> string {
 				break
 			}
 		}
-		p0 := lod.positions[a]
-		p1 := lod.positions[bb]
-		p2 := lod.positions[c]
+		p0 := to_ue(xform.apply_point(t, to_geom(lod.positions[a])))
+		p1 := to_ue(xform.apply_point(t, to_geom(lod.positions[bb])))
+		p2 := to_ue(xform.apply_point(t, to_geom(lod.positions[c])))
 		n := vec3_normalize(vec3_cross(vec3_sub(p1, p0), vec3_sub(p2, p0)))
 		fmt.sbprintf(&b, "%s\n", material)
 		for vertex in ([]int{a, bb, c}) {
-			p := lod.positions[vertex]
+			p := to_ue(xform.apply_point(t, to_geom(lod.positions[vertex])))
 			uv := Vec2{0, 0}
 			if has_uv {
 				uv = lod.uvs[vertex]

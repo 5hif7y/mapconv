@@ -20,6 +20,7 @@ import "diag"
 import "ir"
 import "ue3"
 import "vtf"
+import "xform"
 
 VERSION :: "0.1.0"
 
@@ -456,6 +457,11 @@ resolve_missing_basetextures :: proc(output: string) -> (rewritten: int) {
 	return rewritten
 }
 
+mesh_transform :: proc() -> xform.Transform {
+	t, _ := xform.transform_between(xform.unreal_3(), xform.source_1())
+	return t
+}
+
 write_texture_vtf :: proc(texture: ^ue3.Texture, output, name: string) {
 	first := 0
 	for first < len(texture.mips) && len(texture.mips[first].data) == 0 {
@@ -689,7 +695,7 @@ run_extract :: proc(args: Args, text: string) {
 				defer delete(package_dir)
 				_ = os.make_directory_all(package_dir)
 				for lod_index in 0..<len(resolved.mesh.lods) {
-					obj := ue3.static_mesh_obj(&resolved.mesh, lod_index)
+					obj := ue3.static_mesh_obj(&resolved.mesh, lod_index, mesh_transform())
 					path := fmt.aprintf("%s/%s_L%d.obj", package_dir, info.mesh_name, lod_index)
 					if os.write_entire_file(path, obj) != nil {
 						fmt.eprintfln("mapconv: cannot write %q", path)
@@ -699,7 +705,7 @@ run_extract :: proc(args: Args, text: string) {
 					delete(obj)
 					obj_files += 1
 				}
-				smd := ue3.static_mesh_smd(&resolved.mesh, 0)
+				smd := ue3.static_mesh_smd(&resolved.mesh, 0, mesh_transform())
 				smd_path := fmt.aprintf("%s/%s_L0.smd", package_dir, info.mesh_name)
 				if os.write_entire_file(smd_path, smd) == nil {
 					smd_files += 1
@@ -756,7 +762,7 @@ run_extract :: proc(args: Args, text: string) {
 		dir := fmt.aprintf("%s/%s", args.output, map_stem)
 		_ = os.make_directory_all(dir)
 		for lod_index in 0..<len(mesh.lods) {
-			obj := ue3.static_mesh_obj(&mesh, lod_index)
+			obj := ue3.static_mesh_obj(&mesh, lod_index, mesh_transform())
 			if len(obj) == 0 {
 				continue
 			}
@@ -771,7 +777,7 @@ run_extract :: proc(args: Args, text: string) {
 		}
 		// SMD and QC for the model path the VMF uses: embedded meshes are named
 		// after the map package, referenced ones after their content package.
-		smd := ue3.static_mesh_smd(&mesh, 0)
+		smd := ue3.static_mesh_smd(&mesh, 0, mesh_transform())
 		smd_path := fmt.aprintf("%s/%s_L0.smd", dir, name)
 		if os.write_entire_file(smd_path, smd) == nil {
 			smd_files += 1
