@@ -358,7 +358,7 @@ inspect_text :: proc(pkg: ^Package, path: string) -> string {
 		e := pkg.exports[best]
 		head, hd := read_object_head(pkg, e)
 		if !diag.has_errors(&hd) {
-			fmt.sbprintf(&b, "component %s size %d body %d end %d:\n", name_text(pkg, e.object_name), e.serial_size, head.body_offset - int(e.serial_offset), head.end_offset - int(e.serial_offset))
+			fmt.sbprintf(&b, "component %s offset %d size %d body %d end %d:\n", name_text(pkg, e.object_name), e.serial_offset, e.serial_size, head.body_offset - int(e.serial_offset), head.end_offset - int(e.serial_offset))
 			n := min(96, head.end_offset - head.body_offset)
 			for k in 0..<n {
 				fmt.sbprintf(&b, " %02x", pkg.data[head.body_offset + k])
