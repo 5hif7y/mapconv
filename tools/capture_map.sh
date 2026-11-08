@@ -56,7 +56,7 @@ public class W {
   [DllImport(\"user32.dll\")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
   public struct RECT { public int L, T, R, B; }
 }
-'@; \$h=[W]::FindWindow(\$null,'Source Offensive'); \$r=New-Object W+RECT; if (\$h -ne [IntPtr]::Zero -and [W]::GetWindowRect(\$h,[ref]\$r)) { \$w=\$r.R-\$r.L; \$hh=\$r.B-\$r.T; \$b=New-Object Drawing.Bitmap(\$w,\$hh); \$g=[Drawing.Graphics]::FromImage(\$b); \$g.CopyFromScreen(\$r.L,\$r.T,0,0,\$b.Size); \$b.Save('$OUT'); } else { \$b=New-Object Drawing.Bitmap(1280,720); \$g=[Drawing.Graphics]::FromImage(\$b); \$g.CopyFromScreen(0,0,0,0,\$b.Size); \$b.Save('$OUT'); }" >/dev/null 2>&1 || true
+'@; \$proc=Get-Process | Where-Object { \$_.MainWindowTitle -like '*Source Offensive*' } | Select-Object -First 1; if (\$proc) { \$ws.AppActivate(\$proc.Id) | Out-Null; Start-Sleep -Seconds 1; \$h=\$proc.MainWindowHandle } else { \$h=[IntPtr]::Zero }; \$r=New-Object W+RECT; if (\$h -ne [IntPtr]::Zero -and [W]::GetWindowRect(\$h,[ref]\$r)) { \$w=\$r.R-\$r.L; \$hh=\$r.B-\$r.T; \$b=New-Object Drawing.Bitmap(\$w,\$hh); \$g=[Drawing.Graphics]::FromImage(\$b); \$g.CopyFromScreen(\$r.L,\$r.T,0,0,\$b.Size); \$b.Save('$OUT'); } else { \$b=New-Object Drawing.Bitmap(1280,720); \$g=[Drawing.Graphics]::FromImage(\$b); \$g.CopyFromScreen(0,0,0,0,\$b.Size); \$b.Save('$OUT'); }" >/dev/null 2>&1 || true
 grep -aoE "pos (-?[0-9.]+) (-?[0-9.]+) (-?[0-9.]+)" "$LOG" | tail -1 || true
 powershell.exe -NoProfile -Command "Get-Process csso_win64 -ErrorAction SilentlyContinue | Stop-Process -Force" >/dev/null 2>&1 || true
 echo "captured $OUT after ${waited}s"
