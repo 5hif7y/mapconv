@@ -89,6 +89,30 @@ read_object_head :: proc(
 	e: Export,
 	allocator := context.allocator,
 ) -> (head: Object_Head, d: diag.Diagnostics) {
+	first, first_d := read_object_head_ex(pkg, e, allocator, false)
+	if !diag.has_errors(&first_d) {
+		return first, first_d
+	}
+	// Some non-component subobjects (UDistributionFloatUniform in the script
+	// packages) are serialized with the component prelude: a template owner
+	// reference before the NetIndex. Retry with that prelude instead of
+	// reporting the whole export as uninterpreted; a wrong guess cannot pass
+	// because the tag stream still has to terminate inside the payload.
+	second, second_d := read_object_head_ex(pkg, e, allocator, true)
+	if diag.has_errors(&second_d) {
+		delete(second_d.items)
+		return first, first_d
+	}
+	delete(first_d.items)
+	return second, second_d
+}
+
+read_object_head_ex :: proc(
+	pkg: ^Package,
+	e: Export,
+	allocator := context.allocator,
+	force_component := false,
+) -> (head: Object_Head, d: diag.Diagnostics) {
 	d = diag.init()
 	if e.serial_offset < 0 || e.serial_size < 0 || int(e.serial_offset) + int(e.serial_size) > len(pkg.data) {
 		diag.err(
@@ -137,7 +161,7 @@ read_object_head :: proc(
 	}
 
 	// Components serialize their template owner class before the object prelude.
-	if is_component_class(pkg, e) {
+	if force_component || is_component_class(pkg, e) {
 		head.template_owner_class = read_i32(&r)
 		head.has_template_owner = true
 		if e.object_flags & RF_CLASS_DEFAULT_OBJECT != 0 {
