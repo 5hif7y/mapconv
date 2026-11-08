@@ -45,11 +45,11 @@ build_polys_payload :: proc() -> [dynamic]u8 {
 	put_vec3(&p, 0, 64, 0)
 	put_u32(&p, 1) // PolyFlags
 	put_i32(&p, 0) // Actor
-	put_i32(&p, 0) // ItemName name
-	put_i32(&p, 0) // ItemName number
 	put_i32(&p, 0) // Material
 	put_i32(&p, -1) // iLink
 	put_i32(&p, 0) // iBrushPoly
+	put_i32(&p, 0) // ItemName name
+	put_i32(&p, 0) // ItemName number
 	put_f32(&p, 1.0) // ShadowMapScale
 	put_u32(&p, 1) // LightingChannels
 	return p.buf

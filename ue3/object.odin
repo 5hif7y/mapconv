@@ -326,10 +326,13 @@ read_polys :: proc(
 		}
 		p.poly_flags = read_u32(&r)
 		p.actor_index = read_i32(&r)
-		p.item_name = read_name_ref(&r)
+		// FPoly stores Material right after Actor; RulesetVariation (FName) and
+		// ShadowMap follow iBrushPoly. Reading an FName first shifted the
+		// material index by eight bytes and every face fell back to nodraw.
 		p.material_index = read_i32(&r)
 		p.i_link = read_i32(&r)
 		p.i_brush_poly = read_i32(&r)
+		p.item_name = read_name_ref(&r)
 		p.shadow_map_scale = read_f32(&r)
 		p.lighting_channels = read_u32(&r)
 		if r.failed {

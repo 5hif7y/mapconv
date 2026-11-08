@@ -404,6 +404,22 @@ uv_from_bsp_surf :: proc(model: ^Model, surf: Bsp_Surf) -> ir.TexProjection {
 // winding vertex: FPoly.Base is stored in brush-local space and stays at the
 // creation size when the brush is scaled (max |Base| in villyard is 1024 while
 // its winding reaches 6144). The winding is world space.
+// poly_material_name resolves FPoly.Material only when it really is a material.
+// Some polys point at unrelated exports (particle emitters, material
+// expressions); using those names produced VMTs that do not exist and the
+// engine painted the faces with its magenta missing-material checker.
+poly_material_name :: proc(pkg: ^Package, index: i32) -> string {
+	name := package_index_name(pkg, index)
+	if name == "" || index <= 0 {
+		return "TOOLS/NODRAW"
+	}
+	class := export_class_name(pkg, pkg.exports[int(index) - 1])
+	if class != "Material" && class != "MaterialInstanceConstant" && class != "MaterialInstance" {
+		return "TOOLS/NODRAW"
+	}
+	return name
+}
+
 face_from_poly :: proc(pkg: ^Package, poly: Poly) -> (face: ir.Face, ok: bool) {
 	if len(poly.vertices) < 3 {
 		return {}, false
@@ -428,10 +444,7 @@ face_from_poly :: proc(pkg: ^Package, poly: Poly) -> (face: ir.Face, ok: bool) {
 	}
 
 	plane := geom.Plane{normal = n, dist = geom.dot(n, winding[0])}
-	material := package_index_name(pkg, poly.material_index)
-	if material == "" {
-		material = "TOOLS/NODRAW"
-	}
+	material := poly_material_name(pkg, poly.material_index)
 	face = ir.make_face(plane, uv_from_poly(poly, winding[0]), material)
 	face.winding_source = .Authored
 	for v in winding {
