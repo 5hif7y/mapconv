@@ -31,6 +31,21 @@ MAPCONV=${MAPCONV:-./mapconv}
 
 "$MAPCONV" convert --input "$MAP" --output "$WORK/$NAME.vmf"
 
+# Deterministic spectator camera for captures: a spawn entity at CAPTURE_POS.
+# The converter itself never emits spawns; this is a test-only aid.
+if [ -n "${CAPTURE_POS:-}" ]; then
+	for cls in info_player_terrorist info_player_counterterrorist info_player_start; do
+		cat >> "$WORK_WSL/$NAME.vmf" <<EOF
+entity
+{
+	"classname" "$cls"
+	"origin" "$CAPTURE_POS"
+	"angles" "0 0 0"
+}
+EOF
+	done
+fi
+
 if [ -n "${CONTENT:-}" ]; then
 	"$MAPCONV" extract --input "$MAP" --content "$CONTENT" --output "$WORK/assets"
 	mkdir -p "$CSSO_WSL/csso/materials"
