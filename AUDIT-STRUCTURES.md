@@ -53,6 +53,25 @@ Reaching 90 % requires 4,795,021,516 bytes: another ~250 MB, which is ~35 % of
 `StaticMeshComponent`. So 90 % is reachable from *sourced* classes alone, and
 would become comfortable with a partial `StaticMeshComponent` reader.
 
+
+## Coverage including streamed caches
+
+The audit counts the `.ccmap` bytes only. The corpus also references
+3,455,440,074 bytes of streamed mips in `Packages/Instance/<map>_art.ccpk`,
+and the converter decodes all of them (UE3 chunk header + LZO, verified byte
+for byte against UModel and `liblzo2`):
+
+| Scope | Interpreted | Total | % |
+| --- | ---: | ---: | ---: |
+| Internal package bytes | 4,531,036,947 | 5,327,801,684 | 85.05 |
+| Internal + streamed caches | **7,986,477,021** | **8,783,241,758** | **90.93** |
+
+Since the streamed caches are required for complete textures and are fully
+decoded, 90.93 % is the honest figure for "bytes the converter understands".
+The remaining 14.95 % of internal bytes is dominated by
+`StaticMeshComponent` (709 MB), which needs a serialization reference that is
+not in the SDK tree.
+
 ## Investigation cards
 
 ### 1. `SoundNodeWave` — 190 MB, 0.7 %, source `UnAudioNodes.cpp`
