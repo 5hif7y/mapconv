@@ -408,16 +408,64 @@ uv_from_bsp_surf :: proc(model: ^Model, surf: Bsp_Surf) -> ir.TexProjection {
 // Some polys point at unrelated exports (particle emitters, material
 // expressions); using those names produced VMTs that do not exist and the
 // engine painted the faces with its magenta missing-material checker.
+// poly_material_names lists the material names referenced by one UPolys
+// export, already filtered to real material objects.
+poly_material_names :: proc(pkg: ^Package, export_index: int, allocator := context.allocator) -> []string {
+	set, d := read_polys(pkg, export_index, allocator)
+	defer delete(d.items)
+	if diag.has_errors(&d) {
+		return nil
+	}
+	out := make([dynamic]string, 0, len(set.polygons), allocator)
+	seen := make(map[string]bool, 16, allocator)
+	defer delete(seen)
+	for poly in set.polygons {
+		name := poly_material_name(pkg, poly.material_index)
+		if name == "TOOLS/NODRAW" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		append(&out, name)
+	}
+	return out[:]
+}
+
 poly_material_name :: proc(pkg: ^Package, index: i32) -> string {
 	name := package_index_name(pkg, index)
-	if name == "" || index <= 0 {
+	if name == "" {
 		return "TOOLS/NODRAW"
 	}
-	class := export_class_name(pkg, pkg.exports[int(index) - 1])
-	if class != "Material" && class != "MaterialInstanceConstant" && class != "MaterialInstance" {
+	class: string
+	switch package_index_kind(index) {
+	case .Export:
+		class = export_class_name(pkg, pkg.exports[int(index) - 1])
+	case .Import:
+		// Brush faces usually reference the material through the import table
+		// (the material lives in the level package), so the class must be read
+		// from the import, not rejected for being negative.
+		class = name_text(pkg, pkg.imports[int(-index) - 1].class_name)
+	case .Null:
 		return "TOOLS/NODRAW"
 	}
-	return name
+	if class == "Material" || class == "MaterialInstanceConstant" || class == "MaterialInstance" {
+		return name
+	}
+	// Cooked 576 maps do not always point at the material object itself: the
+	// reference can name the base material (industrial_pr_Lantern03) while the
+	// instances are exported as M_industrial_pr_lantern03_blue. Accept a name
+	// only when an exported material actually contains it, so a stray export
+	// index that lands on an emitter or a material expression stays nodraw.
+	lower := strings.to_lower(name)
+	for e in pkg.exports {
+		export_class := export_class_name(pkg, e)
+		if export_class != "Material" && export_class != "MaterialInstanceConstant" {
+			continue
+		}
+		if strings.contains(strings.to_lower(name_text(pkg, e.object_name)), lower) {
+			return name
+		}
+	}
+	return "TOOLS/NODRAW"
 }
 
 face_from_poly :: proc(pkg: ^Package, poly: Poly) -> (face: ir.Face, ok: bool) {

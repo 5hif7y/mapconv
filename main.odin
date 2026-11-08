@@ -790,6 +790,8 @@ run_extract :: proc(args: Args, text: string) {
 	}
 
 	material_files := 0
+	material_infos := make([dynamic]ue3.Material_Texture, 0, 64)
+	defer delete(material_infos)
 	for e, i in pkg.exports {
 		class := ue3.export_class_name(&pkg, e)
 		if class != "Material" && class != "MaterialInstanceConstant" {
@@ -800,11 +802,57 @@ run_extract :: proc(args: Args, text: string) {
 		if !info.has_texture {
 			continue
 		}
+		append(&material_infos, info)
 		dir := fmt.aprintf("%s/materials/mapconv", args.output)
 		_ = os.make_directory_all(dir)
 		path := fmt.aprintf("%s/%s.vmt", dir, info.material_name)
 		if os.write_entire_file(path, ue3.material_vmt(info)) == nil {
 			material_files += 1
+		}
+	}
+
+	// Brush faces name their material by the base material (for example
+	// industrial_pr_Lantern03) while the instances are exported as
+	// M_industrial_pr_lantern03_blue. Without an alias VMT the engine paints
+	// the whole level with its magenta missing-material checker.
+	alias_files := 0
+	alias_dir := fmt.aprintf("%s/materials/mapconv", args.output)
+	defer delete(alias_dir)
+	for e, i in pkg.exports {
+		if ue3.export_class_name(&pkg, e) != "Polys" {
+			continue
+		}
+		names := ue3.poly_material_names(&pkg, i)
+		defer delete(names)
+		for name in names {
+			vmt := fmt.aprintf("%s/%s.vmt", alias_dir, name)
+			_, stat_err := os.stat(vmt, context.allocator)
+			if stat_err == nil {
+				delete(vmt)
+				continue
+			}
+			best := -1
+			best_score := -1
+			for candidate, ci in material_infos {
+				score := name_affinity(name, candidate.material_name)
+				if score > best_score {
+					best_score = score
+					best = ci
+				}
+			}
+			if best >= 0 {
+				alias := ue3.Material_Texture {
+					material_name = name,
+					texture_name  = material_infos[best].texture_name,
+					has_texture   = true,
+					has_bump      = material_infos[best].has_bump,
+					bump_name     = material_infos[best].bump_name,
+				}
+				if os.write_entire_file(vmt, ue3.material_vmt_for(name, alias)) == nil {
+					alias_files += 1
+				}
+			}
+			delete(vmt)
 		}
 	}
 
