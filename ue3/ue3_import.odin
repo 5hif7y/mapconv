@@ -493,6 +493,12 @@ face_from_poly :: proc(pkg: ^Package, poly: Poly) -> (face: ir.Face, ok: bool) {
 
 	plane := geom.Plane{normal = n, dist = geom.dot(n, winding[0])}
 	material := poly_material_name(pkg, poly.material_index)
+	if material != "TOOLS/NODRAW" {
+		// extract writes every UE3 material under materials/mapconv, and the
+		// engine resolves a VMF material literally, so the face must carry the
+		// same folder. Without it the engine logs "material ... not found".
+		material = fmt.aprintf("mapconv/%s", material)
+	}
 	face = ir.make_face(plane, uv_from_poly(poly, winding[0]), material)
 	face.winding_source = .Authored
 	for v in winding {
