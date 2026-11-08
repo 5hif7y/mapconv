@@ -88,28 +88,45 @@ decompress_mip :: proc(src: []u8, expected: int) -> ([]u8, bool) {
 	}
 
 	out := make([]u8, expected, context.allocator)
-	op := 0
-	seen_comp := 0
-	seen_uncomp := 0
-	for seen_comp < sum_comp && seen_uncomp < sum_uncomp {
+	// The block table is contiguous: every (compressed, uncompressed) pair is
+	// written first and the LZO streams follow it. Reading a stream right after
+	// its own 8-byte header only works for single-block mips.
+	Block :: struct {
+		compressed:   int,
+		uncompressed: int,
+	}
+	blocks := make([dynamic]Block, 0, 8, context.allocator)
+	defer delete(blocks)
+	sum_c, sum_u := 0, 0
+	for sum_u < sum_uncomp {
 		if pos + 8 > len(src) {
 			return nil, false
 		}
-		block_comp := int(i32(u32(src[pos]) | u32(src[pos+1]) << 8 | u32(src[pos+2]) << 16 | u32(src[pos+3]) << 24))
+		bc := int(i32(u32(src[pos]) | u32(src[pos+1]) << 8 | u32(src[pos+2]) << 16 | u32(src[pos+3]) << 24))
 		pos += 4
-		block_uncomp := int(i32(u32(src[pos]) | u32(src[pos+1]) << 8 | u32(src[pos+2]) << 16 | u32(src[pos+3]) << 24))
+		bu := int(i32(u32(src[pos]) | u32(src[pos+1]) << 8 | u32(src[pos+2]) << 16 | u32(src[pos+3]) << 24))
 		pos += 4
-		if block_comp <= 0 || block_uncomp <= 0 || pos + block_comp > len(src) || op + block_uncomp > expected {
+		if bc <= 0 || bu <= 0 || bc > len(src) || bu > expected {
 			return nil, false
 		}
-		n, ok := lzo1x_decompress(src[pos:pos+block_comp], out[op:op+block_uncomp])
-		if !ok || n != block_uncomp {
+		append(&blocks, Block{bc, bu})
+		sum_c += bc
+		sum_u += bu
+	}
+	if sum_u != sum_uncomp || sum_c != sum_comp {
+		return nil, false
+	}
+	op := 0
+	for block in blocks {
+		if pos + block.compressed > len(src) || op + block.uncompressed > expected {
 			return nil, false
 		}
-		pos += block_comp
-		op += block_uncomp
-		seen_comp += block_comp
-		seen_uncomp += block_uncomp
+		n, ok := lzo1x_decompress(src[pos:pos+block.compressed], out[op:op+block.uncompressed])
+		if !ok || n != block.uncompressed {
+			return nil, false
+		}
+		pos += block.compressed
+		op += block.uncompressed
 	}
 	if op != expected {
 		return nil, false
