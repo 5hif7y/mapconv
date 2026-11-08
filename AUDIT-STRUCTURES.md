@@ -187,6 +187,26 @@ priority by bytes but is structurally central; fixing it may explain the
 Remaining bytes are per-object source art or unsupported formats; audit lists
 them per object. Low priority.
 
+
+### DecalComponent (12.8 MB, source-backed)
+
+`UDecalComponent::Serialize` (Engine/Src/DecalComponent.cpp) for 576:
+
+1. `NumStaticReceivers` (INT)
+2. per receiver `FStaticReceiverData` (Engine/Src/DecalRenderData.cpp:403):
+   - `Component` (package index, 4 B)
+   - `Vertices` (`TArray<FDecalVertex>`, BulkSerialize: stride + count + data)
+   - `Indices` (`TArray<WORD>`, BulkSerialize)
+   - `NumTriangles` (INT)
+   - `LightMap1D` (`FLightMapRef`, one reference)
+   - `ShadowMap1D`, `Data`, `InstanceIndex` are gated at 666/621/665, i.e. absent
+     in 576.
+
+Only the reference form of `LightMap1D` and the exact `FDecalVertex` stride are
+unconfirmed; both can be fixed with one probe, then the reader is small.
+The Python tag walker used for probing fails on these objects (its tag rules
+are not complete), so the next probe should use the Odin `inspect` dump, which
+already shares the production tag parser.
 ### 7. `DecalComponent`, `BrushComponent`, `Material`, `ModelComponent`
 
 Small blocks (MB range). Fix after the four large ones; `DecalComponent.cpp`
