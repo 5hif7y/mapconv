@@ -117,11 +117,13 @@ read_model :: proc(
 	}
 	e := pkg.exports[export_index]
 	head, head_d := read_object_head(pkg, e, allocator)
-	defer delete(head_d.items)
 	if diag.has_errors(&head_d) {
+		// Ownership of the items moves to the caller: deleting them here and
+		// again in the caller is a double free that kills the process.
 		d = head_d
 		return
 	}
+	defer delete(head_d.items)
 
 	r := Reader{data = pkg.data, pos = head.body_offset, limit = head.end_offset}
 	model.bounds = FBoxSphereBounds{read_vec3(&r), read_vec3(&r), read_f32(&r)}

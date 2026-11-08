@@ -106,11 +106,13 @@ read_static_mesh :: proc(
 	}
 
 	head, head_d := read_object_head(pkg, e, allocator)
-	defer delete(head_d.items)
 	if diag.has_errors(&head_d) {
+		// Ownership of the items moves to the caller: deleting them here and
+		// again in the caller is a double free that kills the process.
 		d = head_d
 		return
 	}
+	defer delete(head_d.items)
 
 	mesh.export_index = export_index
 	mesh.name = name_text(pkg, e.object_name)

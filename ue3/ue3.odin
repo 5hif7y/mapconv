@@ -215,7 +215,10 @@ need :: proc(r: ^Reader, n: int) -> bool {
 	if r.limit > 0 && r.limit < end {
 		end = r.limit
 	}
-	if n < 0 || r.pos + n > end {
+	// A previous field read through an overflowing count can leave pos
+	// negative; without this guard the index wraps and the process dies with an
+	// access violation instead of reporting a diagnostic.
+	if n < 0 || r.pos < 0 || r.pos + n > end {
 		reader_fail(r, fmt.aprintf("read of %d bytes at offset %d exceeds the available data (%d bytes)", n, r.pos, end))
 		return false
 	}

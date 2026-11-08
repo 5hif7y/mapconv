@@ -347,7 +347,8 @@ run_audit :: proc(args: Args, text: string) {
 		os.exit(1)
 	}
 	audit, audit_d := ue3.audit_package(&pkg)
-	fmt.print(ue3.audit_text(&audit))
+	text_out := ue3.audit_text(&audit)
+	fmt.print(text_out)
 	print_diagnostics(&diagnostics, args.quiet, args.report)
 	_ = audit_d
 	delete(audit.rows)

@@ -4,7 +4,7 @@ from collections import Counter, defaultdict
 MAPCONV="/mnt/c/Users/Shifty/DEV-AI/Research-mapconv/mapconv/mapconv.exe"
 
 def tables(path):
-    out=subprocess.run([MAPCONV,"inspect","--input",path],capture_output=True,text=True,timeout=600).stdout
+    out=subprocess.run([MAPCONV,"inspect","--input",path.replace("/mnt/c/","C:/")],capture_output=True,text=True,timeout=600).stdout
     for line in out.splitlines():
         if line.startswith("tables:"):
             toks=line.replace(","," ").split()

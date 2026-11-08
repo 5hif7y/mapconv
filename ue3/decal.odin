@@ -28,11 +28,13 @@ read_decal_component :: proc(
 	}
 	e := pkg.exports[export_index]
 	head, head_d := read_object_head(pkg, e, allocator)
-	defer delete(head_d.items)
 	if diag.has_errors(&head_d) {
+		// Ownership of the items moves to the caller: deleting them here and
+		// again in the caller is a double free that kills the process.
 		d = head_d
 		return
 	}
+	defer delete(head_d.items)
 	parse :: proc(r: ^Reader, end: int, ref_size: int, res: ^Decal_Component) -> bool {
 		n := read_i32(r)
 		if r.failed || n < 0 || n > 100_000 {
@@ -47,7 +49,9 @@ read_decal_component :: proc(
 			if r.failed || stride <= 0 || stride > 512 || count < 0 || count > 5_000_000 {
 				return false
 			}
-			if int(stride) * int(count) > end - r.pos {
+			// i64: stride*count overflows i32 for large (but accepted) counts,
+			// the product wraps negative and the check passes.
+			if i64(stride) * i64(count) > i64(end - r.pos) {
 				return false
 			}
 			r.pos += int(stride) * int(count)
@@ -57,7 +61,7 @@ read_decal_component :: proc(
 			if r.failed || istride != 2 || icount < 0 || icount > 20_000_000 {
 				return false
 			}
-			if int(icount) * 2 > end - r.pos {
+			if i64(icount) * 2 > i64(end - r.pos) {
 				return false
 			}
 			r.pos += int(icount) * 2
