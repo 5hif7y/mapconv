@@ -810,6 +810,26 @@ run_extract :: proc(args: Args, text: string) {
 			obj_files += 1
 			delete(obj)
 		}
+		_ = os.make_directory_all(fmt.aprintf("%s/materials/mapconv", args.output))
+		for section in mesh.lods[0].sections {
+			mat_name := section.material_name
+			if mat_name == "" {
+				continue
+			}
+			tex_name := mat_name
+			if section.material_ref > 0 {
+				if minfo, md := ue3.read_material_texture(&pkg, int(section.material_ref) - 1); !diag.has_errors(&md) && minfo.has_texture {
+					tex_name = minfo.texture_name
+				}
+			}
+			body := strings.concatenate({"\"VertexLitGeneric\"\n{\n\t\"$basetexture\" \"", tex_name, "\"\n\t\"$model\" \"1\"\n}\n"})
+			vmt_path := fmt.aprintf("%s/materials/mapconv/%s.vmt", args.output, mat_name)
+			if verr := os.write_entire_file(vmt_path, transmute([]u8)body); verr != nil {
+				fmt.eprintfln("VMTFAIL %s", vmt_path)
+			}
+			delete(vmt_path)
+			delete(body)
+		}
 		// SMD and QC for the model path the VMF uses: embedded meshes are named
 		// after the map package, referenced ones after their content package.
 		smd := ue3.static_mesh_smd(&mesh, 0, mesh_transform())
