@@ -487,12 +487,52 @@ write_texture_vtf :: proc(texture: ^ue3.Texture, output, name: string) {
 	if code == 0 || count == 0 {
 		return
 	}
+	// A texture whose larger mips are streamed but whose cache could not be
+	// resolved has a run that does not match the dimensions of its first mip.
+	// Emitting it anyway produces a VTF the engine rejects ("Error reading
+	// texture data"). Walk forward until a suffix is self-consistent.
 	run := make([][]u8, count)
-	for m, k in texture.mips[first:first+count] {
-		run[k] = m.data
-	}
-	if encoded, ok := vtf.encode(int(texture.mips[first].width), int(texture.mips[first].height), code, run); ok {
-		_ = os.write_entire_file(fmt.aprintf("%s/%s.vtf", output, name), encoded)
+	for start in first ..< len(texture.mips) {
+		n := 0
+		for mip in texture.mips[start:] {
+			if len(mip.data) == 0 {
+				break
+			}
+			n += 1
+		}
+		if n == 0 {
+			break
+		}
+		w := int(texture.mips[start].width)
+		h := int(texture.mips[start].height)
+		expected := 0
+		for k in 0 ..< n {
+			mw := max(1, w >> uint(k))
+			mh := max(1, h >> uint(k))
+			switch code {
+			case vtf.IMAGE_FORMAT_DXT1:
+				expected += max(1, (mw + 3) / 4) * max(1, (mh + 3) / 4) * 8
+			case vtf.IMAGE_FORMAT_DXT3, vtf.IMAGE_FORMAT_DXT5:
+				expected += max(1, (mw + 3) / 4) * max(1, (mh + 3) / 4) * 16
+			case:
+				expected += mw * mh * 4
+			}
+		}
+		actual := 0
+		for mip in texture.mips[start:start+n] {
+			actual += len(mip.data)
+		}
+		if actual != expected {
+			continue
+		}
+		part := run[:n]
+		for m, k in texture.mips[start:start+n] {
+			part[k] = m.data
+		}
+		if encoded, ok := vtf.encode(w, h, code, part); ok {
+			_ = os.write_entire_file(fmt.aprintf("%s/%s.vtf", output, name), encoded)
+		}
+		return
 	}
 }
 
@@ -614,7 +654,6 @@ run_extract :: proc(args: Args, text: string) {
 		path := fmt.aprintf("%s/materials/tools/%s.vmt", args.output, name)
 		_ = os.write_entire_file(path, transmute([]u8)body)
 		delete(path)
-		delete(body)
 	}
 
 	// Streamed mips live in the sibling <map>_art.ccpk. When it is available in
