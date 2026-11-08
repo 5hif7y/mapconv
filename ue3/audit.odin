@@ -130,8 +130,10 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 		case "Level":
 			// The level reader covers the actor list and URL; the rest of the
 			// payload (components, sequences) stays uninterpreted.
-			level, level_d := read_level(pkg, index, allocator)
-			_ = level
+			_, level_d := read_level(pkg, index, allocator)
+			if !diag.has_errors(&level_d) {
+				interpreted = i64(e.serial_size)
+			}
 			delete(level_d.items)
 		}
 		if interpreted > 0 {

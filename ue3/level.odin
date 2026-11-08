@@ -102,9 +102,130 @@ read_level :: proc(
 		diag.err(&d, "ue3.bad-level", fmt.aprintf("implausible sequence count %d", level.game_sequences_count))
 		return
 	}
-	// The sequences follow; their payloads are out of scope here.
 	if !need(&r, int(level.game_sequences_count) * 4) {
 		diag.err(&d, "ue3.truncated", r.message)
+		return
+	}
+	r.pos += int(level.game_sequences_count) * 4
+
+	// The rest of ULevel::Serialize for package version 576 follows the source
+	// in Engine/Src/UnLevel.cpp. Every array is bounded by the export end, so a
+	// wrong layout cannot silently consume another export.
+	skip_bulk :: proc(r: ^Reader) -> bool {
+		element_size := read_i32(r)
+		count := read_i32(r)
+		if r.failed || element_size <= 0 || element_size > 256 || count < 0 || count > 50_000_000 {
+			return false
+		}
+		if i64(element_size) * i64(count) > i64(r.limit - r.pos) {
+			return false
+		}
+		r.pos += int(element_size) * int(count)
+		return true
+	}
+	skip_map_of_arrays :: proc(r: ^Reader, stride: int) -> bool {
+		count := read_i32(r)
+		if r.failed || count < 0 || count > 1_000_000 {
+			return false
+		}
+		for _ in 0 ..< int(count) {
+			_ = read_i32(r) // key
+			n := read_i32(r)
+			if r.failed || n < 0 || n > 1_000_000 {
+				return false
+			}
+			if i64(n) * i64(stride) > i64(r.limit - r.pos) {
+				return false
+			}
+			r.pos += int(n) * stride
+		}
+		return true
+	}
+	skip_pairs :: proc(r: ^Reader, value_size: int) -> bool {
+		count := read_i32(r)
+		if r.failed || count < 0 || count > 1_000_000 {
+			return false
+		}
+		if i64(count) * i64(4 + value_size) > i64(r.limit - r.pos) {
+			return false
+		}
+		r.pos += int(count) * (4 + value_size)
+		return true
+	}
+	// TextureToInstancesMap: TMap<UTexture2D*, TArray<FStreamableTextureInstance>>
+	// (FStreamableTextureInstance = FSphere 16 + FLOAT 4).
+	if !skip_map_of_arrays(&r, 20) {
+		diag.err(&d, "ue3.bad-level", "TextureToInstancesMap did not parse")
+		return
+	}
+	// CachedPhysBSPData.BulkSerialize
+	if !skip_bulk(&r) {
+		diag.err(&d, "ue3.bad-level", "CachedPhysBSPData did not parse")
+		return
+	}
+	// CachedPhysSMDataMap: TMultiMap<UStaticMesh*, FCachedPhysSMData> (16 B).
+	if !skip_pairs(&r, 16) {
+		diag.err(&d, "ue3.bad-level", "CachedPhysSMDataMap did not parse")
+		return
+	}
+	// CachedPhysSMDataStore: TArray<FKCachedConvexData>, one array of bulks each.
+	store_count := read_i32(&r)
+	if r.failed || store_count < 0 || store_count > 1_000_000 {
+		diag.err(&d, "ue3.bad-level", "CachedPhysSMDataStore did not parse")
+		return
+	}
+	for _ in 0 ..< int(store_count) {
+		elements := read_i32(&r)
+		if r.failed || elements < 0 || elements > 1_000_000 {
+			diag.err(&d, "ue3.bad-level", "CachedPhysSMDataStore element did not parse")
+			return
+		}
+		for _ in 0 ..< int(elements) {
+			if !skip_bulk(&r) {
+				diag.err(&d, "ue3.bad-level", "CachedPhysSMDataStore payload did not parse")
+				return
+			}
+		}
+	}
+	// CachedPhysPerTriSMDataMap (20 B per value) and its bulk store.
+	if !skip_pairs(&r, 20) {
+		diag.err(&d, "ue3.bad-level", "CachedPhysPerTriSMDataMap did not parse")
+		return
+	}
+	per_tri_count := read_i32(&r)
+	if r.failed || per_tri_count < 0 || per_tri_count > 1_000_000 {
+		diag.err(&d, "ue3.bad-level", "CachedPhysPerTriSMDataStore did not parse")
+		return
+	}
+	for _ in 0 ..< int(per_tri_count) {
+		if !skip_bulk(&r) {
+			diag.err(&d, "ue3.bad-level", "CachedPhysPerTriSMDataStore payload did not parse")
+			return
+		}
+	}
+	_ = read_i32(&r) // CachedPhysBSPDataVersion
+	_ = read_i32(&r) // CachedPhysSMDataVersion
+	// ForceStreamTextures: TMap<UTexture2D*, UBOOL>.
+	if !skip_pairs(&r, 4) {
+		diag.err(&d, "ue3.bad-level", "ForceStreamTextures did not parse")
+		return
+	}
+	_ = read_i32(&r) // NavListStart
+	_ = read_i32(&r) // NavListEnd
+	_ = read_i32(&r) // CoverListStart
+	_ = read_i32(&r) // CoverListEnd
+	cross := read_i32(&r)
+	if r.failed || cross < 0 || cross > 1_000_000 {
+		diag.err(&d, "ue3.bad-level", "CrossLevelActors did not parse")
+		return
+	}
+	if i64(cross) * 4 > i64(r.limit - r.pos) {
+		diag.err(&d, "ue3.bad-level", "CrossLevelActors overruns the export")
+		return
+	}
+	r.pos += int(cross) * 4
+	if r.pos != head.end_offset {
+		diag.err(&d, "ue3.level-layout", fmt.aprintf("ULevel consumed %d of %d bytes", r.pos - head.body_offset, int(e.serial_size) - (head.body_offset - int(e.serial_offset))))
 		return
 	}
 	return

@@ -27,6 +27,22 @@ build_level_payload :: proc() -> [dynamic]u8 {
 	put_i32(&p, 0) // Model reference
 	put_i32(&p, 0) // ModelComponents count
 	put_i32(&p, 0) // GameSequences count
+	// Rest of ULevel::Serialize for 576: empty streaming/physics/cover tables.
+	put_i32(&p, 0) // TextureToInstancesMap
+	put_i32(&p, 1) // CachedPhysBSPData element size
+	put_i32(&p, 0) // CachedPhysBSPData count
+	put_i32(&p, 0) // CachedPhysSMDataMap
+	put_i32(&p, 0) // CachedPhysSMDataStore
+	put_i32(&p, 0) // CachedPhysPerTriSMDataMap
+	put_i32(&p, 0) // CachedPhysPerTriSMDataStore
+	put_i32(&p, 0) // CachedPhysBSPDataVersion
+	put_i32(&p, 0) // CachedPhysSMDataVersion
+	put_i32(&p, 0) // ForceStreamTextures
+	put_i32(&p, 0) // NavListStart
+	put_i32(&p, 0) // NavListEnd
+	put_i32(&p, 0) // CoverListStart
+	put_i32(&p, 0) // CoverListEnd
+	put_i32(&p, 0) // CrossLevelActors
 	return p.buf
 }
 
