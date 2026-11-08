@@ -25,18 +25,38 @@ rm -f "$LOG"
 	+sv_cheats 1 +map "$MAP" +noclip +cl_showpos 1 +setpos $POS >/dev/null 2>&1 & ) || true
 
 waited=0
+loaded=0
 while [ "$waited" -lt "$LIMIT" ]; do
 	sleep 2
 	waited=$((waited + 2))
 	[ -f "$LOG" ] || continue
-	# The engine logs the level load and a spawn once the map is live.
-	if grep -qiE "spawn server|Level .* loaded|Started map" "$LOG"; then
-		break
+	# "Spawn Server" is logged before the renderer resources are ready, so it
+	# only arms the stability check; the map is considered live once the log
+	# has stopped growing for six seconds after at least 20 seconds.
+	if [ "$loaded" -eq 0 ] && grep -qi "Spawn Server" "$LOG"; then
+		loaded=$waited
+	fi
+	if [ "$loaded" -gt 0 ] && [ $((waited - loaded)) -ge 20 ]; then
+		size_a=$(wc -c < "$LOG")
+		sleep 6
+		waited=$((waited + 6))
+		size_b=$(wc -c < "$LOG")
+		if [ "$size_a" -eq "$size_b" ]; then
+			break
+		fi
 	fi
 done
 
-sleep 3
-powershell.exe -NoProfile -Command "\$ws=New-Object -ComObject WScript.Shell; \$ws.AppActivate('Source Offensive') | Out-Null; Start-Sleep -Seconds 1; Add-Type -AssemblyName System.Windows.Forms,System.Drawing; \$b=New-Object Drawing.Bitmap(1280,720); \$g=[Drawing.Graphics]::FromImage(\$b); \$g.CopyFromScreen(0,0,0,0,\$b.Size); \$b.Save('$OUT');" >/dev/null 2>&1 || true
+sleep 2
+powershell.exe -NoProfile -Command "\$ws=New-Object -ComObject WScript.Shell; \$ws.AppActivate('Source Offensive') | Out-Null; Start-Sleep -Seconds 1; Add-Type -AssemblyName System.Windows.Forms,System.Drawing; Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public class W {
+  [DllImport(\"user32.dll\")] public static extern IntPtr FindWindow(string c, string n);
+  [DllImport(\"user32.dll\")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+  public struct RECT { public int L, T, R, B; }
+}
+'@; \$h=[W]::FindWindow(\$null,'Source Offensive'); \$r=New-Object W+RECT; if (\$h -ne [IntPtr]::Zero -and [W]::GetWindowRect(\$h,[ref]\$r)) { \$w=\$r.R-\$r.L; \$hh=\$r.B-\$r.T; \$b=New-Object Drawing.Bitmap(\$w,\$hh); \$g=[Drawing.Graphics]::FromImage(\$b); \$g.CopyFromScreen(\$r.L,\$r.T,0,0,\$b.Size); \$b.Save('$OUT'); } else { \$b=New-Object Drawing.Bitmap(1280,720); \$g=[Drawing.Graphics]::FromImage(\$b); \$g.CopyFromScreen(0,0,0,0,\$b.Size); \$b.Save('$OUT'); }" >/dev/null 2>&1 || true
 grep -aoE "pos (-?[0-9.]+) (-?[0-9.]+) (-?[0-9.]+)" "$LOG" | tail -1 || true
 powershell.exe -NoProfile -Command "Get-Process csso_win64 -ErrorAction SilentlyContinue | Stop-Process -Force" >/dev/null 2>&1 || true
 echo "captured $OUT after ${waited}s"
