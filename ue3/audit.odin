@@ -121,6 +121,12 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 				interpreted = i64(e.serial_size)
 			}
 			delete(skel_d.items)
+		case "ModelComponent":
+			_, mc_d := read_model_component(pkg, index, allocator)
+			if !diag.has_errors(&mc_d) {
+				interpreted = i64(e.serial_size)
+			}
+			delete(mc_d.items)
 		case "StaticMeshComponent":
 			_, smc_d := read_static_mesh_component(pkg, index, allocator)
 			if !diag.has_errors(&smc_d) {
