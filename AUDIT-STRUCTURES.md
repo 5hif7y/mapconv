@@ -13,8 +13,8 @@ Current state:
 
 | Metric | Bytes | % |
 | --- | ---: | ---: |
-| Interpreted | 3,762,476,746 | 70.62 |
-| Uninterpreted | 1,565,324,938 | 29.38 |
+| Interpreted | 4,519,170,175 | 84.82 |
+| Uninterpreted | 808,631,509 | 15.18 |
 | Streamed mips (`*_art.ccpk`) | 3,455,440,074 | decodable, outside these files |
 
 ## Priority by uninterpreted bytes
@@ -23,7 +23,7 @@ Current state:
 
 | Class | Uninterpreted | Payload | Interpreted | Maps | Source available |
 | --- | ---: | ---: | ---: | ---: | --- |
-| `SkeletalMesh` | 756,693,429 | 757,058,326 | 0.0 % | 20 | `Engine/Src/UnSkeletalMesh.cpp` |
+| `SkeletalMesh` | 0 | 757,058,326 | 100.0 % | 20 | done (`ue3/skeletal_mesh.odin`) |
 | `StaticMeshComponent` | 709,401,800 | 723,039,376 | 1.9 % | 142 | **no source** |
 | `AnimSequence` | 0 | 213,339,252 | 100.0 % | 24 | done (`ue3/anim.odin`) |
 | `SoundNodeWave` | 0 | 191,429,414 | 100.0 % | 142 | done (`ue3/sound.odin`) |
@@ -43,10 +43,10 @@ uninterpreted.
 
 | Step | Cumulative | % |
 | --- | ---: | ---: |
-| Current (after AnimSequence) | 3,762,476,746 | 70.62 |
+| Current (after SkeletalMesh) | 4,519,170,175 | 84.82 |
 
 
-| + `SkeletalMesh` | 4,519,170,175 | 84.82 |
+
 | + `Level`, `Decal`, `Brush`, tails | ~4,545,000,000 | ~85.3 |
 
 Reaching 90 % requires 4,795,021,516 bytes: another ~250 MB, which is ~35 % of

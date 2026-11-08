@@ -103,6 +103,12 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 			}
 			delete(texture.mips)
 			delete(texture_d.items)
+		case "SkeletalMesh":
+			_, skel_d := read_skeletal_mesh(pkg, index, allocator)
+			if !diag.has_errors(&skel_d) {
+				interpreted = i64(e.serial_size)
+			}
+			delete(skel_d.items)
 		case "AnimSequence":
 			_, anim_d := read_anim_sequence(pkg, index, allocator)
 			if !diag.has_errors(&anim_d) {
