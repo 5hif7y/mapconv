@@ -381,9 +381,14 @@ resolve_missing_basetextures :: proc(output: string) -> (rewritten: int) {
 	textures := make([dynamic]string, 0, 64)
 	defer delete(textures)
 	for e in entries {
-		if strings.has_suffix(strings.to_lower(e.name), ".vtf") {
-			append(&textures, e.name[:len(e.name) - 4])
+		if !strings.has_suffix(strings.to_lower(e.name), ".vtf") {
+			continue
 		}
+		stem := e.name[:len(e.name) - 4]
+		if !ue3.is_diffuse_candidate(stem) {
+			continue
+		}
+		append(&textures, stem)
 	}
 	if len(textures) == 0 {
 		return 0
@@ -441,7 +446,20 @@ resolve_missing_basetextures :: proc(output: string) -> (rewritten: int) {
 			if stat_err == nil {
 				continue
 			}
-			lines[i] = fmt.aprintf("\t\"$basetexture\" \"%s\"", textures[0])
+			// Pick the candidate that shares the most name tokens with the
+			// material: the first entry of the directory is alphabetical and
+			// used to be a channel-blend map, which painted every FX material
+			// as a red/green/blue panel.
+			best := textures[0]
+			best_score := -1
+			for candidate in textures {
+				score := name_affinity(name, candidate)
+				if score > best_score {
+					best_score = score
+					best = candidate
+				}
+			}
+			lines[i] = fmt.aprintf("\t\"$basetexture\" \"%s\"", best)
 			changed = true
 			rewritten += 1
 		}
@@ -455,6 +473,21 @@ resolve_missing_basetextures :: proc(output: string) -> (rewritten: int) {
 		delete(path)
 	}
 	return rewritten
+}
+
+// name_affinity counts the lowercased "_"-separated tokens two names share.
+name_affinity :: proc(a, b: string) -> int {
+	la := strings.split(strings.to_lower(a), "_", context.temp_allocator)
+	lb := strings.split(strings.to_lower(b), "_", context.temp_allocator)
+	score := 0
+	for x in la {
+		for y in lb {
+			if x == y && len(x) > 2 {
+				score += 1
+			}
+		}
+	}
+	return score
 }
 
 mesh_transform :: proc() -> xform.Transform {

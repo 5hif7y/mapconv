@@ -71,8 +71,18 @@ read_material_texture :: proc(pkg: ^Package, export_index: int, allocator := con
 	return
 }
 
+// is_diffuse_candidate reports whether a texture name may serve as $basetexture.
+is_diffuse_candidate :: proc(name: string) -> bool {
+	return !looks_like_normal(name) && !looks_like_mask(name)
+}
+
 looks_like_mask :: proc(name: string) -> bool {
 	lower := strings.to_lower(name)
+	// Channel-blend maps (3_blend_dirt_map) are literal red/green/blue bands and
+	// rendered as bright RGB panels when sampled as the diffuse.
+	if strings.contains(lower, "blend_dirt") || strings.contains(lower, "blend_map") || strings.contains(lower, "channel_map") {
+		return true
+	}
 	return strings.contains(lower, "mask") || strings.has_suffix(lower, "_lm")
 }
 

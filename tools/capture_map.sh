@@ -56,7 +56,16 @@ public class W {
   [DllImport(\"user32.dll\")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
   public struct RECT { public int L, T, R, B; }
 }
-'@; \$proc=Get-Process | Where-Object { \$_.MainWindowTitle -like '*Source Offensive*' } | Select-Object -First 1; if (\$proc) { \$ws.AppActivate(\$proc.Id) | Out-Null; Start-Sleep -Seconds 1; \$ws.SendKeys('{ENTER}') | Out-Null; Start-Sleep -Seconds 1; \$ws.SendKeys('6') | Out-Null; Start-Sleep -Milliseconds 500; \$ws.SendKeys('{F5}') | Out-Null; Start-Sleep -Seconds 1; \$h=\$proc.MainWindowHandle } else { \$h=[IntPtr]::Zero }; \$r=New-Object W+RECT; if (\$h -ne [IntPtr]::Zero -and [W]::GetWindowRect(\$h,[ref]\$r)) { \$w=\$r.R-\$r.L; \$hh=\$r.B-\$r.T; \$b=New-Object Drawing.Bitmap(\$w,\$hh); \$g=[Drawing.Graphics]::FromImage(\$b); \$g.CopyFromScreen(\$r.L,\$r.T,0,0,\$b.Size); \$b.Save('$OUT'); } else { \$b=New-Object Drawing.Bitmap(1280,720); \$g=[Drawing.Graphics]::FromImage(\$b); \$g.CopyFromScreen(0,0,0,0,\$b.Size); \$b.Save('$OUT'); }" >/dev/null 2>&1 || true
+'@; \$proc=Get-Process | Where-Object { \$_.MainWindowTitle -like '*Source Offensive*' } | Select-Object -First 1; if (\$proc) { \$ws.AppActivate(\$proc.Id) | Out-Null; Start-Sleep -Seconds 1; \$ws.SendKeys('{ENTER}') | Out-Null; Start-Sleep -Seconds 1; \$ws.SendKeys('6') | Out-Null; Start-Sleep -Milliseconds 500; \$ws.SendKeys('{F5}') | Out-Null; Start-Sleep -Seconds 1; \$h=\$proc.MainWindowHandle } else { \$h=[IntPtr]::Zero }; \$r=New-Object W+RECT; if (\$h -ne [IntPtr]::Zero -and [W]::GetWindowRect(\$h,[ref]\$r)) { \$w=\$r.R-\$r.L; \$hh=\$r.B-\$r.T; \$b=New-Object Drawing.Bitmap(\$w,\$hh); \$g=[Drawing.Graphics]::FromImage(\$b); \$g.CopyFromScreen(\$r.L,\$r.T,0,0,\$b.Size); \$b.Save('$OUT'); } else { throw 'csso window not found' }" >/dev/null 2>&1 || true
+case "$OUT" in
+[A-Za-z]:*) OUT_WSL="/mnt/$(printf %s "$OUT" | cut -c1 | tr A-Z a-z)$(printf %s "$OUT" | cut -c3-)" ;;
+*) OUT_WSL=$OUT ;;
+esac
+if [ ! -f "$OUT_WSL" ]; then
+	echo "capture_map: csso window not found, refusing to save a foreign window" >&2
+	powershell.exe -NoProfile -Command "Get-Process csso_win64 -ErrorAction SilentlyContinue | Stop-Process -Force" >/dev/null 2>&1 || true
+	exit 1
+fi
 grep -aoE "pos (-?[0-9.]+) (-?[0-9.]+) (-?[0-9.]+)" "$LOG" | tail -1 || true
 powershell.exe -NoProfile -Command "Get-Process csso_win64 -ErrorAction SilentlyContinue | Stop-Process -Force" >/dev/null 2>&1 || true
 echo "captured $OUT after ${waited}s"
