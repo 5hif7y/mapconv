@@ -341,7 +341,7 @@ convert_bytes :: proc(data: []u8, source_path: string, opts: Options) -> Result 
 			}
 		}
 		if !has_sky {
-			append(&res.doc.world.props, ir.Property{key = "skyname", value = "sky_day01_01", raw = "sky_day01_01"})
+			append(&res.doc.world.props, ir.Property{key = "skyname", value = "sky_cs15_daylight01_hdr", raw = "sky_cs15_daylight01_hdr"})
 		}
 		seal_world(&res.doc, 1024)
 	}

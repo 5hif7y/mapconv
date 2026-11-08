@@ -671,16 +671,9 @@ run_extract :: proc(args: Args, text: string) {
 	// Sky and tool materials ship inside the game VPK, not in UE3 content. When
 	// the package carries cubemap faces, publish them as a 2D skybox so the
 	// worldspawn skyname resolves, and give the seal shell a real tool material.
-	sky_names := [6]string{"rt", "lf", "bk", "ft", "up", "dn"}
-	_ = os.make_directory_all(fmt.aprintf("%s/materials/skybox", args.output))
-	for name, i in sky_names {
-		face := fmt.aprintf("CubemapFace%d", i)
-		body := strings.concatenate({"\"UnlitGeneric\"\n{\n\t\"$basetexture\" \"", face, "\"\n\t\"$nofog\" \"1\"\n\t\"$ignorez\" \"1\"\n}\n"})
-		path := fmt.aprintf("%s/materials/skybox/sky_day01_01%s.vmt", args.output, name)
-		_ = os.write_entire_file(path, transmute([]u8)body)
-		delete(path)
-		delete(body)
-	}
+	// The synthetic cubemap faces (128 px clouds) were stretched over the whole
+	// sky and produced the purple gradients, so the worldspawn asks the game VPK
+	// for a real 2D sky (sky_cs15_daylight01_hdr) instead of overriding it.
 	// TOOLS/TOOLSSKYBOX and TOOLS/TOOLSNODRAW ship in the game VPK; overriding
 	// them painted the seal shell with a cubemap face, so nothing is emitted.
 
