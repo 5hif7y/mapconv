@@ -20,9 +20,9 @@ def dxt5(block,out,ox,oy,w,h):
     a0,a1=block[0],block[1]
     ac=[a0,a1]
     if a0>a1:
-        for i in range(1,6): ac.append(((7-i)*a0+i*a1)//7)
+        for i in range(1,7): ac.append(((7-i)*a0+i*a1)//7)
     else:
-        for i in range(1,4): ac.append(((5-i)*a0+i*a1)//5)
+        for i in range(1,5): ac.append(((5-i)*a0+i*a1)//5)
         ac += [0,255]
     bits=int.from_bytes(block[2:8],'little')
     c0,c1,idx=struct.unpack_from('<HHI',block,8)
@@ -51,9 +51,11 @@ h=struct.unpack_from('<I',d,12)[0]; w=struct.unpack_from('<I',d,16)[0]
 fourcc=d[84:88]
 bs=8 if fourcc==b'DXT1' else 16
 out=[(0,0,0,255)]*(w*h)
+d = d + b'\x00' * (bs * ((w+3)//4) * ((h+3)//4))
 pos=128; bw=(w+3)//4; bh=(h+3)//4
 for by in range(bh):
     for bx in range(bw):
+        if pos+bs>len(d): break
         blk=d[pos:pos+bs]; pos+=bs
         (dxt1 if fourcc==b'DXT1' else dxt5)(blk,out,bx*4,by*4,w,h)
 write_png(sys.argv[2],w,h,out)
