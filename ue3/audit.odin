@@ -19,6 +19,15 @@ Audit_Row :: struct {
 	interpreted: i64,
 }
 
+Audit_Object :: struct {
+	class_name:  string,
+	object_name: string,
+	size:        i64,
+	interpreted: i64,
+	offset:      i64,
+	reason:      string,
+}
+
 Audit :: struct {
 	file_size:   i64,
 	header:      i64,
@@ -26,6 +35,7 @@ Audit :: struct {
 	interpreted: i64,
 	streamed:    i64,
 	rows:        [dynamic]Audit_Row,
+	objects:     [dynamic]Audit_Object,
 }
 
 audit_row :: proc(audit: ^Audit, class_name: string, allocator := context.allocator) -> ^Audit_Row {
@@ -44,6 +54,7 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 	d = diag.init()
 	audit.file_size = i64(len(pkg.data))
 	audit.rows = make([dynamic]Audit_Row, 0, 32, allocator)
+	audit.objects = make([dynamic]Audit_Object, 0, 32, allocator)
 	if pkg.summary.total_header_size > 0 && i64(pkg.summary.total_header_size) <= audit.file_size {
 		audit.header = i64(pkg.summary.total_header_size)
 	}
@@ -62,8 +73,9 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 		audit.payload += i64(e.serial_size)
 
 		head, head_d := read_object_head(pkg, e, allocator)
+		head_failed := diag.has_errors(&head_d)
 		interpreted: i64 = 0
-		if !diag.has_errors(&head_d) {
+		if !head_failed {
 			interpreted = i64(head.body_offset - int(e.serial_offset))
 			if interpreted > i64(e.serial_size) {
 				interpreted = i64(e.serial_size)
@@ -140,6 +152,22 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 			row.interpreted += interpreted
 			audit.interpreted += interpreted
 		}
+		if interpreted < i64(e.serial_size) {
+			reason := "no-reader"
+			if head_failed {
+				reason = "object-head"
+			} else if interpreted > 0 {
+				reason = "partial"
+			}
+			append(&audit.objects, Audit_Object {
+				class_name = class,
+				object_name = name_text(pkg, e.object_name),
+				size = i64(e.serial_size),
+				interpreted = interpreted,
+				offset = i64(e.serial_offset),
+				reason = reason,
+			})
+		}
 	}
 
 	sort.quick_sort_proc(audit.rows[:], proc(a, b: Audit_Row) -> int {
@@ -152,6 +180,44 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 		return 0
 	})
 	return
+}
+
+// audit_objects_text lists every export with a residual, largest first, with
+// the bytes consumed and the class of failure. It is what turns an aggregate
+// percentage into a work queue.
+audit_objects_text :: proc(audit: ^Audit) -> string {
+	b := strings.builder_make()
+	strings.write_string(&b, "\nresiduals (bytes, size, read, class, reason, offset, name):\n")
+	rows := make([dynamic]Audit_Object, 0, len(audit.objects))
+	defer delete(rows)
+	for o in audit.objects {
+		append(&rows, o)
+	}
+	sort.quick_sort_proc(rows[:], proc(a, b: Audit_Object) -> int {
+		ra := a.size - a.interpreted
+		rb := b.size - b.interpreted
+		if ra > rb {
+			return -1
+		}
+		if ra < rb {
+			return 1
+		}
+		return 0
+	})
+	for o in rows {
+		fmt.sbprintf(
+			&b,
+			"  %10d %10d %10d %-28s %-11s %10d %s\n",
+			o.size - o.interpreted,
+			o.size,
+			o.interpreted,
+			o.class_name,
+			o.reason,
+			o.offset,
+			o.object_name,
+		)
+	}
+	return strings.to_string(b)
 }
 
 audit_text :: proc(audit: ^Audit) -> string {

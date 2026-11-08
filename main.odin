@@ -66,6 +66,7 @@ Args :: struct {
 	report:   string,
 	content:  string,
 	quiet:    bool,
+	objects:  bool,
 	materials: bool,
 	ok:       bool,
 }
@@ -166,6 +167,8 @@ parse_args :: proc(argv: []string) -> (args: Args, ok: bool) {
 			continue
 		}
 		switch flag {
+		case "--objects":
+			args.objects = true
 		case "--quiet":
 			args.quiet = true
 		case "--no-materials":
@@ -347,11 +350,14 @@ run_audit :: proc(args: Args, text: string) {
 		os.exit(1)
 	}
 	audit, audit_d := ue3.audit_package(&pkg)
-	text_out := ue3.audit_text(&audit)
-	fmt.print(text_out)
+	fmt.print(ue3.audit_text(&audit))
+	if args.objects {
+		fmt.print(ue3.audit_objects_text(&audit))
+	}
 	print_diagnostics(&diagnostics, args.quiet, args.report)
 	_ = audit_d
 	delete(audit.rows)
+	delete(audit.objects)
 }
 
 // merge_diags appends one diagnostic list to another and frees the source.
