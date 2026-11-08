@@ -22,7 +22,7 @@ LOG="$CSSO_WSL/csso/console.log"
 rm -f "$LOG"
 
 ( "$CSSO_WSL/csso_win64.exe" -game csso -dev -condebug -console -novid -windowed -w 1280 -h 720 \
-	+sv_cheats 1 +map "$MAP" +noclip +cl_showpos 1 +bind f5 "setpos $POS" >/dev/null 2>&1 & ) || true
+	+sv_cheats 1 +map "$MAP" +noclip +cl_showpos 1 "+bind f5 \"setpos $POS\"" >/dev/null 2>&1 & ) || true
 
 waited=0
 loaded=0
