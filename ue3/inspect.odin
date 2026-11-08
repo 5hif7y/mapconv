@@ -431,7 +431,11 @@ inspect_text :: proc(pkg: ^Package, path: string) -> string {
 
 	shown_texture := 0
 	for e, i in pkg.exports {
-		if export_class_name(pkg, e) != "Texture2D" || shown_texture >= 2 {
+		if export_class_name(pkg, e) != "Texture2D" {
+			continue
+		}
+		nm := strings.to_lower(name_text(pkg, e.object_name))
+		if !strings.contains(nm, "crete_celling_01") && !strings.contains(nm, "bank_hotel") {
 			continue
 		}
 		tex, td := read_texture(pkg, i)

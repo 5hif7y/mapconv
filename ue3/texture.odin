@@ -197,6 +197,12 @@ read_texture :: proc(
 			if bulk.flags & BULKDATA_COMPRESSED != 0 {
 				if decoded, decoded_ok := decompress_mip(mip.data, int(bulk.count)); decoded_ok {
 					mip.data = decoded
+				} else {
+					// Never expose the compressed bytes as if they were DXT
+					// data: that is what produced noisy full-res textures.
+					// Dropping the mip lets the exporter fall back to the
+					// smaller inline chain, which is intact.
+					mip.data = nil
 				}
 			}
 		}
