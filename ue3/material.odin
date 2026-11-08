@@ -54,6 +54,10 @@ read_material_texture :: proc(pkg: ^Package, export_index: int, allocator := con
 						info.bump_name = name
 						info.has_bump = true
 					}
+				} else if looks_like_mask(name) {
+					// Channel masks (floor_mask) render as flat RGB if used as
+					// the diffuse; leave the base empty for the fallback.
+					continue
 				} else if !info.has_texture {
 					info.texture_name = name
 					info.has_texture = true
@@ -65,6 +69,11 @@ read_material_texture :: proc(pkg: ^Package, export_index: int, allocator := con
 		}
 	}
 	return
+}
+
+looks_like_mask :: proc(name: string) -> bool {
+	lower := strings.to_lower(name)
+	return strings.contains(lower, "mask") || strings.has_suffix(lower, "_lm")
 }
 
 looks_like_normal :: proc(name: string) -> bool {
