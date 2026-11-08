@@ -822,7 +822,12 @@ run_extract :: proc(args: Args, text: string) {
 					tex_name = minfo.texture_name
 				}
 			}
-			body := strings.concatenate({"\"VertexLitGeneric\"\n{\n\t\"$basetexture\" \"", tex_name, "\"\n\t\"$model\" \"1\"\n}\n"})
+			material_info := ue3.Material_Texture {
+				material_name = mat_name,
+				texture_name  = tex_name,
+				has_texture   = true,
+			}
+			body := ue3.material_vmt_for(mat_name, material_info)
 			vmt_path := fmt.aprintf("%s/materials/mapconv/%s.vmt", args.output, mat_name)
 			if verr := os.write_entire_file(vmt_path, transmute([]u8)body); verr != nil {
 				fmt.eprintfln("VMTFAIL %s", vmt_path)

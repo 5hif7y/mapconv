@@ -78,7 +78,7 @@ looks_like_mask :: proc(name: string) -> bool {
 
 looks_like_normal :: proc(name: string) -> bool {
 	lower := strings.to_lower(name)
-	normal_suffixes := [8]string{"_n", "_nm", "_norm", "_normal", "_bump", "_bumpmap", "_normalmap", "_nrm"}
+	normal_suffixes := [11]string{"_n", "_nm", "_norm", "_normal", "_bump", "_bumpmap", "_normalmap", "_nrm", "_nsp", "_ns", "_spec"}
 	for suffix in normal_suffixes {
 		if strings.has_suffix(lower, suffix) {
 			return true
@@ -90,13 +90,48 @@ looks_like_normal :: proc(name: string) -> bool {
 	return strings.has_prefix(lower, "n_")
 }
 
-material_vmt :: proc(info: Material_Texture) -> string {
+// UE3 blend modes have no direct byte in the cooked material we read, so the
+// shader is chosen from the material name and the sampled texture: effects
+// (light beams, fire, smoke, dust) are additive or translucent in the source
+// game and render as flat RGB panels under VertexLitGeneric.
+material_shader :: proc(mat_name, texture_name: string) -> (shader: string, params: string) {
+	// Source model shaders: UnlitGeneric refuses the studiomdl vertex format
+	// ("does not support vertex format used by the mesh"), so every material
+	// stays VertexLitGeneric and emissive textures are self-lit instead.
+	lower := strings.to_lower(mat_name)
+	texture_lower := strings.to_lower(texture_name)
+	emissive := strings.has_suffix(texture_lower, "_e") || strings.contains(texture_lower, "emissive") || strings.contains(texture_lower, "neon")
 	b := strings.builder_make()
-	strings.write_string(&b, "\"VertexLitGeneric\"\n{\n")
+	strings.write_string(&b, "\t\"$model\" \"1\"\n")
+	if emissive {
+		strings.write_string(&b, "\t\"$selfillum\" \"1\"\n\t\"$selfillumtint\" \"[1 1 1]\"\n")
+	}
+	if strings.contains(lower, "smoke") || strings.contains(lower, "dust") {
+		strings.write_string(&b, "\t\"$translucent\" \"1\"\n")
+	}
+	return "VertexLitGeneric", strings.to_string(b)
+}
+
+material_vmt_for :: proc(mat_name: string, info: Material_Texture) -> string {
+	b := strings.builder_make()
+	shader, params := material_shader(mat_name, info.texture_name)
+	// Concatenation, not fmt: a literal "{" in a format string is a delimiter
+	// and silently disappears, which leaves an invalid VMT.
+	strings.write_string(&b, "\"")
+	strings.write_string(&b, shader)
+	strings.write_string(&b, "\"\n{\n")
 	fmt.sbprintf(&b, "\t\"$basetexture\" \"%s\"\n", info.texture_name)
-	if info.has_bump {
+	if info.has_bump && shader == "VertexLitGeneric" {
 		fmt.sbprintf(&b, "\t\"$bumpmap\" \"%s\"\n", info.bump_name)
 	}
-	strings.write_string(&b, "\t\"$model\" \"1\"\n}\n")
+	strings.write_string(&b, params)
+	strings.write_string(&b, "}\n")
+	if shader != "VertexLitGeneric" {
+		delete(params)
+	}
 	return strings.to_string(b)
+}
+
+material_vmt :: proc(info: Material_Texture) -> string {
+	return material_vmt_for(info.material_name, info)
 }
