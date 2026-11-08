@@ -648,13 +648,8 @@ run_extract :: proc(args: Args, text: string) {
 		delete(path)
 		delete(body)
 	}
-	_ = os.make_directory_all(fmt.aprintf("%s/materials/tools", args.output))
-	for name in ([]string{"toolsskybox", "toolsnodraw", "toolsinvisible"}) {
-		body := "\"UnlitGeneric\"\n{\n\t\"$basetexture\" \"CubemapFace0\"\n\t\"$model\" \"1\"\n}\n"
-		path := fmt.aprintf("%s/materials/tools/%s.vmt", args.output, name)
-		_ = os.write_entire_file(path, transmute([]u8)body)
-		delete(path)
-	}
+	// TOOLS/TOOLSSKYBOX and TOOLS/TOOLSNODRAW ship in the game VPK; overriding
+	// them painted the seal shell with a cubemap face, so nothing is emitted.
 
 	// Streamed mips live in the sibling <map>_art.ccpk. When it is available in
 	// the content tree, re-extract those textures so the files carry the full

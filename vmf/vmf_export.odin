@@ -245,6 +245,11 @@ write_side :: proc(w: ^Writer, indent: int, f: ^ir.Face, dg: ^diag.Diagnostics) 
 	p0, p1, p2 := plane_output_points(f)
 	write_kv(w, indent + 1, "plane", fmt.aprintf("(%s) (%s) (%s)", geom.vec3_string(p0), geom.vec3_string(p1), geom.vec3_string(p2)))
 	material := f.material
+	if material == "TOOLS/NODRAW" || material == "tools/nodraw" {
+		// Unreal's nodraw name differs from the Source material; without this
+		// the seal shell renders as the black checkerboard.
+		material = "TOOLS/TOOLSNODRAW"
+	}
 	if material == "DefaultMaterial" {
 		// Unreal's placeholder has no Source counterpart; a missing material
 		// renders as the checkerboard, whereas nodraw is invisible.
