@@ -46,13 +46,17 @@ read_material_texture :: proc(pkg: ^Package, export_index: int, allocator := con
 			}
 			name := package_index_name(pkg, value)
 			if name != "" && name != "None" {
-				if !info.has_texture {
+				// The first reference is not necessarily the diffuse: UE3 lists
+				// normal maps among them. A normal map used as $basetexture is
+				// what produced the purple/striped surfaces in the engine.
+				if looks_like_normal(name) {
+					if !info.has_bump {
+						info.bump_name = name
+						info.has_bump = true
+					}
+				} else if !info.has_texture {
 					info.texture_name = name
 					info.has_texture = true
-				} else if !info.has_bump && looks_like_normal(name) {
-					info.bump_name = name
-					info.has_bump = true
-					break
 				}
 			}
 		}
