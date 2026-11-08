@@ -109,6 +109,12 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 				interpreted = i64(e.serial_size)
 			}
 			delete(skel_d.items)
+		case "DecalComponent":
+			_, decal_d := read_decal_component(pkg, index, allocator)
+			if !diag.has_errors(&decal_d) {
+				interpreted = i64(e.serial_size)
+			}
+			delete(decal_d.items)
 		case "AnimSequence":
 			_, anim_d := read_anim_sequence(pkg, index, allocator)
 			if !diag.has_errors(&anim_d) {

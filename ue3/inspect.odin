@@ -344,6 +344,28 @@ inspect_text :: proc(pkg: ^Package, path: string) -> string {
 	}
 
 
+	// Decal bodies: NumStaticReceivers then FStaticReceiverData records.
+	shown_decals := 0
+	for e in pkg.exports {
+		if export_class_name(pkg, e) != "DecalComponent" || e.serial_size < 1000 {
+			continue
+		}
+		head, hd := read_object_head(pkg, e)
+		if !diag.has_errors(&hd) {
+			fmt.sbprintf(&b, "decal %s offset %d size %d body %d end %d:", name_text(pkg, e.object_name), e.serial_offset, e.serial_size, head.body_offset - int(e.serial_offset), head.end_offset - int(e.serial_offset))
+			n := min(64, head.end_offset - head.body_offset)
+			for k in 0..<n {
+				fmt.sbprintf(&b, " %02x", pkg.data[head.body_offset + k])
+			}
+			strings.write_byte(&b, '\n')
+		}
+		delete(hd.items)
+		shown_decals += 1
+		if shown_decals >= 2 {
+			break
+		}
+	}
+
 	// Sound payloads: NetIndex and tags, then the FBulkData members.
 	shown_sounds := 0
 	for e in pkg.exports {

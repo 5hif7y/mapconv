@@ -13,8 +13,8 @@ Current state:
 
 | Metric | Bytes | % |
 | --- | ---: | ---: |
-| Interpreted | 4,519,170,175 | 84.82 |
-| Uninterpreted | 808,631,509 | 15.18 |
+| Interpreted | 4,531,036,947 | 85.05 |
+| Uninterpreted | 796,764,737 | 14.95 |
 | Streamed mips (`*_art.ccpk`) | 3,455,440,074 | decodable, outside these files |
 
 ## Priority by uninterpreted bytes
@@ -27,7 +27,7 @@ Current state:
 | `StaticMeshComponent` | 709,401,800 | 723,039,376 | 1.9 % | 142 | **no source** |
 | `AnimSequence` | 0 | 213,339,252 | 100.0 % | 24 | done (`ue3/anim.odin`) |
 | `SoundNodeWave` | 0 | 191,429,414 | 100.0 % | 142 | done (`ue3/sound.odin`) |
-| `DecalComponent` | 12,843,596 | 13,456,116 | 4.6 % | 31 | `Engine/Src/DecalComponent.cpp` |
+| `DecalComponent` | 0 | 13,456,116 | 100.0 % | 31 | done (`ue3/decal.odin`) |
 | `SpeedTreeComponent` | 11,102,672 | 11,294,824 | 1.7 % | 18 | licensed, stripped |
 | `BrushComponent` | 5,276,289 | 9,166,529 | 42.4 % | 129 | `Engine/Src/...` partial |
 | `Texture2D` (tail) | 3,579,777 | 266,562,629 | 98.7 % | 128 | best effort |
@@ -43,7 +43,7 @@ uninterpreted.
 
 | Step | Cumulative | % |
 | --- | ---: | ---: |
-| Current (after SkeletalMesh) | 4,519,170,175 | 84.82 |
+| Current (after DecalComponent) | 4,531,036,947 | 85.05 |
 
 
 
