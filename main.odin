@@ -601,7 +601,8 @@ run_extract :: proc(args: Args, text: string) {
 	sky_names := [6]string{"rt", "lf", "bk", "ft", "up", "dn"}
 	_ = os.make_directory_all(fmt.aprintf("%s/materials/skybox", args.output))
 	for name, i in sky_names {
-		body := fmt.aprintf("\"UnlitGeneric\"\n{\n\t\"$basetexture\" \"CubemapFace%d\"\n\t\"$nofog\" \"1\"\n\t\"$ignorez\" \"1\"\n}\n", i)
+		face := fmt.aprintf("CubemapFace%d", i)
+		body := strings.concatenate({"\"UnlitGeneric\"\n{\n\t\"$basetexture\" \"", face, "\"\n\t\"$nofog\" \"1\"\n\t\"$ignorez\" \"1\"\n}\n"})
 		path := fmt.aprintf("%s/materials/skybox/sky_day01_01%s.vmt", args.output, name)
 		_ = os.write_entire_file(path, transmute([]u8)body)
 		delete(path)
@@ -609,7 +610,7 @@ run_extract :: proc(args: Args, text: string) {
 	}
 	_ = os.make_directory_all(fmt.aprintf("%s/materials/tools", args.output))
 	for name in ([]string{"toolsskybox", "toolsnodraw", "toolsinvisible"}) {
-		body := fmt.aprintf("\"UnlitGeneric\"\n{\n\t\"$basetexture\" \"CubemapFace0\"\n\t\"$model\" \"1\"\n}\n")
+		body := "\"UnlitGeneric\"\n{\n\t\"$basetexture\" \"CubemapFace0\"\n\t\"$model\" \"1\"\n}\n"
 		path := fmt.aprintf("%s/materials/tools/%s.vmt", args.output, name)
 		_ = os.write_entire_file(path, transmute([]u8)body)
 		delete(path)
