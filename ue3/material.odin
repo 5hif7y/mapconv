@@ -69,7 +69,16 @@ read_material_texture :: proc(pkg: ^Package, export_index: int, allocator := con
 
 looks_like_normal :: proc(name: string) -> bool {
 	lower := strings.to_lower(name)
-	return strings.has_suffix(lower, "_n") || strings.has_suffix(lower, "_normal") || strings.contains(lower, "normal")
+	normal_suffixes := [8]string{"_n", "_nm", "_norm", "_normal", "_bump", "_bumpmap", "_normalmap", "_nrm"}
+	for suffix in normal_suffixes {
+		if strings.has_suffix(lower, suffix) {
+			return true
+		}
+	}
+	if strings.contains(lower, "normal") || strings.contains(lower, "bumpmap") {
+		return true
+	}
+	return strings.has_prefix(lower, "n_")
 }
 
 material_vmt :: proc(info: Material_Texture) -> string {
