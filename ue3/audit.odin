@@ -182,6 +182,59 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 	return
 }
 
+// audit_dump_text prints the object head of every export: the offsets, the
+// tagged properties and the first bytes of the native body. It is the probe for
+// layouts that do not match the reader (a truncated texture, a mystery prefix).
+audit_dump_text :: proc(pkg: ^Package) -> string {
+	b := strings.builder_make()
+	for e, index in pkg.exports {
+		if e.serial_size <= 0 {
+			continue
+		}
+		head, head_d := read_object_head(pkg, e)
+		class := export_class_name(pkg, e)
+		name := name_text(pkg, e.object_name)
+		if diag.has_errors(&head_d) {
+			fmt.sbprintf(&b, "EXPORT %d %s %s serial=%d size=%d HEAD-FAILED\n", index, class, name, e.serial_offset, e.serial_size)
+			delete(head_d.items)
+			continue
+		}
+		fmt.sbprintf(
+			&b,
+			"EXPORT %d %s %s serial=%d size=%d body=%d tags=%d\n",
+			index,
+			class,
+			name,
+			e.serial_offset,
+			e.serial_size,
+			head.body_offset - int(e.serial_offset),
+			len(head.tags),
+		)
+		for tag in head.tags {
+			value_offset := tag.value_offset - int(e.serial_offset)
+			fmt.sbprintf(
+				&b,
+				"  TAG %-28s %-24s size=%-6d arr=%-3d value_at=%d\n",
+				tag_name(pkg, tag),
+				name_text(pkg, tag.type),
+				tag.size,
+				tag.array_index,
+				value_offset,
+			)
+		}
+		n := head.end_offset - head.body_offset
+		if n > 0 {
+			fmt.sbprintf(&b, "  BODY %d bytes:", n)
+			for i in 0 ..< min(n, 48) {
+				fmt.sbprintf(&b, " %02x", pkg.data[head.body_offset + i])
+			}
+			strings.write_byte(&b, '\n')
+		}
+		delete(head_d.items)
+	}
+	return strings.to_string(b)
+}
+
 // audit_objects_text lists every export with a residual, largest first, with
 // the bytes consumed and the class of failure. It is what turns an aggregate
 // percentage into a work queue.

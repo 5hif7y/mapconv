@@ -67,6 +67,7 @@ Args :: struct {
 	content:  string,
 	quiet:    bool,
 	objects:  bool,
+	dump:     bool,
 	materials: bool,
 	ok:       bool,
 }
@@ -169,6 +170,8 @@ parse_args :: proc(argv: []string) -> (args: Args, ok: bool) {
 		switch flag {
 		case "--objects":
 			args.objects = true
+		case "--dump":
+			args.dump = true
 		case "--quiet":
 			args.quiet = true
 		case "--no-materials":
@@ -353,6 +356,9 @@ run_audit :: proc(args: Args, text: string) {
 	fmt.print(ue3.audit_text(&audit))
 	if args.objects {
 		fmt.print(ue3.audit_objects_text(&audit))
+	}
+	if args.dump {
+		fmt.print(ue3.audit_dump_text(&pkg))
 	}
 	print_diagnostics(&diagnostics, args.quiet, args.report)
 	_ = audit_d

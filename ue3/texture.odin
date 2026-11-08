@@ -53,7 +53,20 @@ read_bulk_data_header :: proc(r: ^Reader) -> (Bulk_Header, bool) {
 		size   = read_i32(r),
 		offset = read_i32(r),
 	}
-	if r.failed || h.size < 0 {
+	if r.failed {
+		return {}, false
+	}
+	if h.size < 0 {
+		// Streamed textures can carry an "unused" placeholder mip: flags 0x20
+		// with size and offset set to -1. It holds no data but the mip
+		// dimensions still follow, so treating it as an error truncates the
+		// whole texture (the case of every *_art package mip chain).
+		if h.flags & 0x20 != 0 && h.size == -1 {
+			h.count = 0
+			h.size = 0
+			h.offset = 0
+			return h, true
+		}
 		return {}, false
 	}
 	return h, true
