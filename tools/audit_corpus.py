@@ -13,34 +13,10 @@ The script never writes to the tree it audits.
 """
 import json
 import os
-import struct
 import subprocess
 import sys
 
 MAPCONV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "mapconv.exe")
-
-LUMP_NAMES = [
-    "entities", "planes", "texdata", "vertexes", "visibility", "nodes",
-    "texinfo", "faces", "lighting", "occlusion", "leafs", "leafFaces",
-    "leafBrushes", "edges", "surfedges", "brushes", "brushSides", "areas",
-    "areaPortals", "portals", "clusters", "portalVerts", "clusterPortals",
-    "dispinfo", "origFaces", "origVerts", "origEdges", "origSurfEdges",
-    "origBrushes", "origBrushSides", "dtexdata", "ddispinfo", "game",
-    "faceIds", "lightmapHeaders", "lightmapSamples", "lightmapBrushes",
-    "lightmapBrushesFaces", "lightmapDisps", "lightmapDispVerts", "pakfile",
-    "clipPortalVerts", "cubemaps", "texdataStringData", "texdataStringTable",
-    "overlays", "leafMinDistToWater", "faceMacroTextureInfo", "dispTris",
-    "physCollide", "vertNormals", "vertNormalIndices",
-    "dispLightmapSamplePositions", "dispmultiblend", "waterOverlays",
-    "waterOverlaysData", "leafAmbientIndexHDR", "leafAmbientIndex",
-    "lightmappages", "worldlights", "leafAmbientLightingHDR",
-    "leafAmbientLighting", "xbSpawnPoints", "staticPropLighting",
-    "staticPropLightingHDR", "staticPropNormal",
-]
-# Lumps whose layout this tool does not interpret yet.
-# Lumps the BSP reader does not consume yet. 0,1,2,3,5,6,7,10,12,13,14,17,18,19,26,43,44 are read.
-BSP_UNPARSED = {4, 8, 29, 34, 49, 53}
-
 
 def windows_path(path):
     if path.startswith("/mnt/") and len(path) > 6:
@@ -81,29 +57,24 @@ def find(root, suffix):
 
 
 def source_maps(csso):
+    """Source maps: ask mapconv for the lump table it actually interprets."""
     files = find(csso, ".bsp")
     total = interpreted = 0
-    unparsed = {}
+    gaps = {}
     for path in files:
-        size = os.path.getsize(path)
-        total += size
-        with open(path, "rb") as handle:
-            data = handle.read(8 + 64 * 16)
-        if data[:4] != b"VBSP":
-            continue
-        lumps = 0
-        for index in range(64):
-            offset, length, _version, _fourcc = struct.unpack_from("<4i", data, 8 + index * 16)
-            if length <= 0 or offset + length > size:
-                continue
-            lumps += length
-            if index in BSP_UNPARSED:
-                unparsed[index] = unparsed.get(index, 0) + length
-        interpreted += lumps
-    for index, length in unparsed.items():
-        interpreted -= length
-        name = LUMP_NAMES[index] if index < len(LUMP_NAMES) else str(index)
-        print(f"  bsp lump {index:2d} {name:24s} {length:14d} unparsed")
+        total += os.path.getsize(path)
+        out = subprocess.run(
+            [MAPCONV, "audit", "--input", windows_path(path)],
+            capture_output=True, text=True, timeout=1800,
+        )
+        for line in out.stdout.splitlines():
+            tokens = line.split()
+            if line.startswith("interpreted:"):
+                interpreted += int(tokens[1])
+            elif line.startswith("  lump") and len(tokens) >= 6 and tokens[-1] != "interpreted":
+                gaps[tokens[2]] = gaps.get(tokens[2], 0) + int(tokens[3])
+    for name, length in sorted(gaps.items(), key=lambda item: -item[1]):
+        print(f"  bsp lump {name:30s} {length:14d} unparsed")
     return {"files": len(files), "bytes": total, "interpreted": interpreted}
 
 

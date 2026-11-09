@@ -345,9 +345,16 @@ run_extract_bsp :: proc(args: Args, text: string) {
 	print_diagnostics(&diagnostics, args.quiet, args.report)
 }
 
-// run_audit reports how many bytes of a UE3 package the reader interprets.
+// run_audit reports how many bytes of a package the reader interprets.
 run_audit :: proc(args: Args, text: string) {
-	pkg, diagnostics := ue3.parse(transmute([]u8)text)
+	data := transmute([]u8)text
+	if strings.has_suffix(args.input, ".bsp") || strings.has_suffix(args.input, ".BSP") {
+		audit := bsp.audit_lumps(data)
+		fmt.print(bsp.audit_lumps_text(&audit))
+		bsp.audit_lumps_destroy(&audit)
+		return
+	}
+	pkg, diagnostics := ue3.parse(data)
 	if diag.has_errors(&diagnostics) {
 		print_diagnostics(&diagnostics, args.quiet, args.report)
 		os.exit(1)
