@@ -107,6 +107,96 @@ read_object_head :: proc(
 	return second, second_d
 }
 
+// read_tag_stream consumes a tagged property stream up to its ``None`` terminator
+// and returns the tags. The caller owns the slice. It is shared by object heads
+// and by UScriptStruct, whose defaults are tagged properties too.
+read_tag_stream :: proc(
+	pkg: ^Package,
+	r: ^Reader,
+	end_offset: int,
+	export_size: int,
+	allocator := context.allocator,
+	d: ^diag.Diagnostics,
+) -> []Property_Tag {
+	tags := make([dynamic]Property_Tag, 0, 4, allocator)
+	version := engine_version(&pkg.summary)
+	for {
+		if r.pos + 8 > end_offset {
+			diag.err(
+				d,
+				"ue3.tags-overrun",
+				fmt.aprintf("property tag stream overruns the export at offset %d", r.pos),
+			)
+			return nil
+		}
+		name := read_name_ref(r)
+		if r.failed {
+			diag.err(d, "ue3.truncated", r.message)
+			return nil
+		}
+		if is_none_name(pkg, name) {
+			break
+		}
+		type := read_name_ref(r)
+		size := read_i32(r)
+		array_index := read_i32(r)
+		if r.failed {
+			diag.err(d, "ue3.truncated", r.message)
+			return nil
+		}
+		tag := Property_Tag {
+			name         = name,
+			type         = type,
+			size         = size,
+			array_index  = array_index,
+		}
+		type_text := name_text(pkg, type)
+		if type_text == "StructProperty" {
+			tag.struct_name = read_name_ref(r)
+		} else if type_text == "BoolProperty" {
+			if version < VER_PROPERTYTAG_BOOL_OPTIMIZATION {
+				tag.bool_value = u8(read_u32(r))
+			} else {
+				tag.bool_value = read_u8(r)
+			}
+		} else if type_text == "ByteProperty" && version >= VER_BYTEPROP_SERIALIZE_ENUM {
+			tag.enum_name = read_name_ref(r)
+		}
+		if r.failed {
+			diag.err(d, "ue3.truncated", r.message)
+			return nil
+		}
+		if size < 0 || int(size) > export_size {
+			diag.err(
+				d,
+				"ue3.bad-property-size",
+				fmt.aprintf("property %s declares size %d in a %d-byte export", name_text(pkg, name), size, export_size),
+			)
+			return nil
+		}
+		tag.value_offset = r.pos
+		if !need(r, int(size)) {
+			diag.err(
+				d,
+				"ue3.tags-overrun",
+				fmt.aprintf("property %s value overruns the export", name_text(pkg, name)),
+			)
+			return nil
+		}
+		r.pos += int(size)
+		append(&tags, tag)
+		if r.pos > end_offset {
+			diag.err(d, "ue3.tags-overrun", "property tag stream overruns the export")
+			return nil
+		}
+	}
+	if r.pos > end_offset {
+		diag.err(d, "ue3.tags-overrun", "property tag terminator overruns the export")
+		return nil
+	}
+	return tags[:]
+}
+
 read_object_head_ex :: proc(
 	pkg: ^Package,
 	e: Export,
@@ -179,82 +269,11 @@ read_object_head_ex :: proc(
 		return
 	}
 
-	tags := make([dynamic]Property_Tag, 0, 4, allocator)
-	for {
-		if r.pos + 8 > head.end_offset {
-			diag.err(
-				&d,
-				"ue3.tags-overrun",
-				fmt.aprintf("property tag stream overruns the export at offset %d", r.pos),
-			)
-			return
-		}
-		name := read_name_ref(&r)
-		if r.failed {
-			diag.err(&d, "ue3.truncated", r.message)
-			return
-		}
-		if is_none_name(pkg, name) {
-			break
-		}
-		type := read_name_ref(&r)
-		size := read_i32(&r)
-		array_index := read_i32(&r)
-		if r.failed {
-			diag.err(&d, "ue3.truncated", r.message)
-			return
-		}
-		tag := Property_Tag {
-			name         = name,
-			type         = type,
-			size         = size,
-			array_index  = array_index,
-		}
-		type_text := name_text(pkg, type)
-		if type_text == "StructProperty" {
-			tag.struct_name = read_name_ref(&r)
-		} else if type_text == "BoolProperty" {
-			if version < VER_PROPERTYTAG_BOOL_OPTIMIZATION {
-				tag.bool_value = u8(read_u32(&r))
-			} else {
-				tag.bool_value = read_u8(&r)
-			}
-		} else if type_text == "ByteProperty" && version >= VER_BYTEPROP_SERIALIZE_ENUM {
-			tag.enum_name = read_name_ref(&r)
-		}
-		if r.failed {
-			diag.err(&d, "ue3.truncated", r.message)
-			return
-		}
-		if size < 0 || size > e.serial_size {
-			diag.err(
-				&d,
-				"ue3.bad-property-size",
-				fmt.aprintf("property %s declares size %d in a %d-byte export", name_text(pkg, name), size, e.serial_size),
-			)
-			return
-		}
-		tag.value_offset = r.pos
-		if !need(&r, int(size)) {
-			diag.err(
-				&d,
-				"ue3.tags-overrun",
-				fmt.aprintf("property %s value overruns the export", name_text(pkg, name)),
-			)
-			return
-		}
-		r.pos += int(size)
-		append(&tags, tag)
-		if r.pos > head.end_offset {
-			diag.err(&d, "ue3.tags-overrun", "property tag stream overruns the export")
-			return
-		}
-	}
-	if r.pos > head.end_offset {
-		diag.err(&d, "ue3.tags-overrun", "property tag terminator overruns the export")
+	tags := read_tag_stream(pkg, &r, head.end_offset, int(e.serial_size), allocator, &d)
+	if diag.has_errors(&d) {
 		return
 	}
-	head.tags = tags[:]
+	head.tags = tags
 	head.body_offset = r.pos
 	return
 }

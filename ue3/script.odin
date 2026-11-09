@@ -26,6 +26,12 @@ import "../diag"
 // UFunction then writes iNative (WORD), OperPrecedence (BYTE), FunctionFlags
 // (DWORD), RepOffset (WORD, only when FUNC_Net is set) and FriendlyName, which
 // is an FName (UnClass.h:388), so eight bytes and not a string.
+Script_Kind :: enum {
+	Plain,
+	Script_Struct,
+	Function,
+}
+
 Script_Body :: struct {
 	children:  int,
 	bytecode:  int,
@@ -38,7 +44,17 @@ read_script_struct :: proc(
 	export_index: int,
 	allocator := context.allocator,
 ) -> (result: Script_Body, d: diag.Diagnostics) {
-	return read_script(pkg, export_index, false, allocator)
+	return read_script(pkg, export_index, .Plain, allocator)
+}
+
+// UScriptStruct::Serialize (UnClass.cpp:1763) appends StructFlags and then the
+// tagged defaults, so the tag stream belongs to the same payload.
+read_script_struct_with_defaults :: proc(
+	pkg: ^Package,
+	export_index: int,
+	allocator := context.allocator,
+) -> (result: Script_Body, d: diag.Diagnostics) {
+	return read_script(pkg, export_index, .Script_Struct, allocator)
 }
 
 read_function :: proc(
@@ -46,13 +62,13 @@ read_function :: proc(
 	export_index: int,
 	allocator := context.allocator,
 ) -> (result: Script_Body, d: diag.Diagnostics) {
-	return read_script(pkg, export_index, true, allocator)
+	return read_script(pkg, export_index, .Function, allocator)
 }
 
 read_script :: proc(
 	pkg: ^Package,
 	export_index: int,
-	is_function: bool,
+	kind: Script_Kind,
 	allocator: runtime.Allocator,
 ) -> (result: Script_Body, d: diag.Diagnostics) {
 	d = diag.init()
@@ -93,7 +109,20 @@ read_script :: proc(
 	}
 	r.pos += int(bytecode)
 	result.bytecode = int(bytecode)
-	if !is_function {
+	if kind == .Script_Struct {
+		result.flags = read_u32(&r)
+		tags := read_tag_stream(pkg, &r, head.end_offset, int(e.serial_size), allocator, &d)
+		delete(tags)
+		if diag.has_errors(&d) {
+			return
+		}
+		if r.pos != head.end_offset {
+			diag.err(&d, "ue3.script-layout", fmt.aprintf("UScriptStruct consumed %d of %d bytes", r.pos - head.body_offset, head.end_offset - head.body_offset))
+			return
+		}
+		return
+	}
+	if kind == .Plain {
 		if r.pos != head.end_offset {
 			diag.err(&d, "ue3.script-layout", fmt.aprintf("UStruct consumed %d of %d bytes", r.pos - head.body_offset, head.end_offset - head.body_offset))
 			return
