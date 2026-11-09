@@ -204,11 +204,37 @@ read_skeletal_mesh :: proc(
 	   !consumed(&r, &d, int(entries) * SKEL_NAME_INDEX_ENTRY, "name-index-map") {
 		return
 	}
-	// PerPolyBoneKDOPs / BoneBreakNames tail: only the empty form is known.
-	tail := read_i32(&r)
-	if !count_ok(&r, &d, tail, 1_000_000, "per-poly-kdops") || tail != 0 {
-		diag.err(&d, "ue3.skeletal-tail", fmt.aprintf("unexpected tail count %d", tail))
+	// PerPolyBoneKDOPs: per bone the compact kDOP tree (a nodes bulk and a
+	// triangle bulk) followed by the collision vertices (UnSkeletalMesh.h:4455,
+	// UnkDOP.h:2178 and :3033).
+	kdops := read_i32(&r)
+	if !count_ok(&r, &d, kdops, 100_000, "per-poly-kdops") {
 		return
+	}
+	for _ in 0 ..< int(kdops) {
+		_ = skip_bulk(&r) // kDOP nodes
+		_ = skip_bulk(&r) // kDOP triangles
+		verts := read_i32(&r)
+		if r.failed || !count_ok(&r, &d, verts, 1_000_000, "collision-verts") ||
+		   !consumed(&r, &d, int(verts) * 12, "collision-verts") {
+			return
+		}
+	}
+	// BoneBreakNames from VER_ADDED_EXTRA_SKELMESH_VERTEX_INFLUENCE_MAPPING (609)
+	// as a TArray of FName, and the per-name options from 694 (absent here).
+	if version >= 609 {
+		names := read_i32(&r)
+		if !count_ok(&r, &d, names, 1_000_000, "bone-break-names") ||
+		   !consumed(&r, &d, int(names) * 8, "bone-break-names") {
+			return
+		}
+		if version >= 694 {
+			options := read_i32(&r)
+			if !count_ok(&r, &d, options, 1_000_000, "bone-break-options") ||
+			   !consumed(&r, &d, int(options), "bone-break-options") {
+				return
+			}
+		}
 	}
 	if r.pos != end {
 		diag.err(
