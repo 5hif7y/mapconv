@@ -38,7 +38,8 @@ LUMP_NAMES = [
     "staticPropLightingHDR", "staticPropNormal",
 ]
 # Lumps whose layout this tool does not interpret yet.
-BSP_UNPARSED = {4, 7, 8, 29, 34, 49, 53}
+# Lumps the BSP reader does not consume yet. 0,1,2,3,5,6,7,10,12,13,14,17,18,19,26,43,44 are read.
+BSP_UNPARSED = {4, 8, 29, 34, 49, 53}
 
 
 def windows_path(path):
