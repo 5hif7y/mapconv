@@ -121,6 +121,12 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 				interpreted = i64(e.serial_size)
 			}
 			delete(skel_d.items)
+		case "ShaderCache":
+			_, scache_d := read_shader_cache(pkg, index, allocator)
+			if !diag.has_errors(&scache_d) {
+				interpreted = i64(e.serial_size)
+			}
+			delete(scache_d.items)
 		case "PhysicsAssetInstance":
 			_, pai_d := read_physics_asset_instance(pkg, index, allocator)
 			if !diag.has_errors(&pai_d) {
