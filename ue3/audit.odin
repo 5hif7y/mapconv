@@ -121,6 +121,18 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 				interpreted = i64(e.serial_size)
 			}
 			delete(skel_d.items)
+		case "Function":
+			_, fn_d := read_function(pkg, index, allocator)
+			if !diag.has_errors(&fn_d) {
+				interpreted = i64(e.serial_size)
+			}
+			delete(fn_d.items)
+		case "ScriptStruct", "State":
+			_, struct_d := read_script_struct(pkg, index, allocator)
+			if !diag.has_errors(&struct_d) {
+				interpreted = i64(e.serial_size)
+			}
+			delete(struct_d.items)
 		case "Font":
 			_, font_d := read_font(pkg, index, allocator)
 			if !diag.has_errors(&font_d) {
