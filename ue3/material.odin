@@ -183,14 +183,28 @@ skip_expression :: proc(r: ^Reader, pkg: ^Package, type_name: string) -> bool {
 		// one nested expression
 		return skip_uniform_array_element(r, pkg)
 	case "FMaterialUniformExpressionAppendVector", "FMaterialUniformExpressionFoldedMath":
-		// A, B, then a BYTE (operator or component count)
+		// A, B, then the operator (BYTE) or the component count (INT)
 		if !skip_uniform_array_element(r, pkg) || !skip_uniform_array_element(r, pkg) {
 			return false
 		}
-		if r.limit - r.pos < 1 {
+		extra := 1
+		if type_name == "FMaterialUniformExpressionAppendVector" {
+			extra = 4
+		}
+		if r.limit - r.pos < extra {
 			return false
 		}
-		r.pos += 1
+		r.pos += extra
+		return true
+	case "FMaterialUniformExpressionSine":
+		// X plus the UBOOL bIsCosine
+		if !skip_uniform_array_element(r, pkg) {
+			return false
+		}
+		if r.limit - r.pos < 4 {
+			return false
+		}
+		r.pos += 4
 		return true
 	case:
 		return false
