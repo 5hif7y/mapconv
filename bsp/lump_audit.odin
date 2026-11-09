@@ -133,6 +133,11 @@ audit_lumps_text :: proc(a: ^Lump_Audit) -> string {
 	b := strings.builder_make()
 	fmt.sbprintf(&b, "file bytes:      %12d\n", a.interpreted + a.uninterpreted)
 	fmt.sbprintf(&b, "interpreted:     %12d (%.1f%%)\n", a.interpreted, percent(a.interpreted, a.interpreted + a.uninterpreted))
+	// The header (ident, version and the 64 lump descriptors) is parsed by read,
+	// so it is credited on its own line.
+	header: i64 = 8 + HEADER_LUMPS * 16
+	credited := a.interpreted + header
+	fmt.sbprintf(&b, "credited:        %12d (%.1f%%)\n", credited, percent(credited, a.interpreted + a.uninterpreted))
 	fmt.sbprintf(&b, "uninterpreted:   %12d\n", a.uninterpreted)
 	for row in a.rows {
 		status := "interpreted"

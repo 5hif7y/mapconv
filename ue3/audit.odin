@@ -404,7 +404,14 @@ audit_text :: proc(audit: ^Audit) -> string {
 	fmt.sbprintf(&b, "header+tables:   %d (%.1f%%)\n", audit.header, pct(audit.header, audit.file_size))
 	fmt.sbprintf(&b, "export payloads: %d\n", audit.payload)
 	fmt.sbprintf(&b, "interpreted:     %d (%.1f%% of file)\n", audit.interpreted, pct(audit.interpreted, audit.file_size))
-	fmt.sbprintf(&b, "uninterpreted:   %d (%.1f%%)\n", audit.file_size - audit.interpreted, pct(audit.file_size - audit.interpreted, audit.file_size))
+	// D2: the header and tables are parsed by ue3.parse, so they are credited
+	// too, but always on their own line so the payload figure stays visible.
+	credited := audit.interpreted + audit.header
+	if credited > audit.file_size {
+		credited = audit.file_size
+	}
+	fmt.sbprintf(&b, "credited:        %d (%.1f%% of file, payload + tables)\n", credited, pct(credited, audit.file_size))
+	fmt.sbprintf(&b, "uninterpreted:   %d (%.1f%%)\n", audit.file_size - credited, pct(audit.file_size - credited, audit.file_size))
 	if audit.streamed > 0 {
 		fmt.sbprintf(&b, "streamed mips:   %d bytes referenced outside the file\n", audit.streamed)
 	}

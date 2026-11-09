@@ -37,6 +37,8 @@ def audit_package(path, classes):
         tokens = line.split()
         if line.startswith("interpreted:"):
             data["interpreted"] = int(tokens[1])
+        elif line.startswith("credited:"):
+            data["credited"] = int(tokens[1])
         elif line.startswith("uninterpreted:"):
             data["uninterpreted"] = int(tokens[1])
         elif line.startswith("  ") and len(tokens) >= 7 and tokens[2] == "payload":
@@ -69,7 +71,7 @@ def source_maps(csso):
         )
         for line in out.stdout.splitlines():
             tokens = line.split()
-            if line.startswith("interpreted:"):
+            if line.startswith("credited:"):
                 interpreted += int(tokens[1])
             elif line.startswith("  lump") and len(tokens) >= 6 and tokens[-1] != "interpreted":
                 gaps[tokens[2]] = gaps.get(tokens[2], 0) + int(tokens[3])
@@ -79,9 +81,11 @@ def source_maps(csso):
 
 
 def report(title, root, suffix, allow_missing=False):
+    """Report the D2 tier figure (payload plus the parsed header and tables) and
+    the D1 payload figure next to it, so neither hides the other."""
     classes = {}
     files = find(root, suffix)
-    total = interpreted = 0
+    total = interpreted = payload = 0
     skipped = 0
     for path in files:
         data = audit_package(path, classes)
@@ -91,16 +95,19 @@ def report(title, root, suffix, allow_missing=False):
         if data["interpreted"] == 0 and data["uninterpreted"] == 0:
             skipped += 1
             continue
-        total += data["interpreted"] + data["uninterpreted"]
-        interpreted += data["interpreted"]
+        charged = data.get("credited", data["interpreted"])
+        total += charged + data["uninterpreted"]
+        interpreted += charged
+        payload += data["interpreted"]
     pct = 100.0 * interpreted / total if total else 0.0
-    print(f"{title}: {len(files)} files, {interpreted} / {total} B = {pct:.2f}%")
+    ppct = 100.0 * payload / total if total else 0.0
+    print(f"{title}: {len(files)} files, {interpreted} / {total} B = {pct:.2f}% (payload {ppct:.2f}%)")
     if skipped:
         print(f"  {skipped} file(s) produced no audit output")
     gaps = [(payload - seen, payload, seen, name) for name, (payload, seen, _n) in classes.items() if payload > seen]
     for gap, payload, seen, name in sorted(gaps, reverse=True)[:10]:
         print(f"  {gap:12d} {payload:12d} {100.0*seen/payload:6.1f}%  {name}")
-    return {"files": len(files), "bytes": total, "interpreted": interpreted, "classes": classes}
+    return {"files": len(files), "bytes": total, "interpreted": interpreted, "payload": payload, "classes": classes}
 
 
 def main():
