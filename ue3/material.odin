@@ -176,12 +176,22 @@ skip_expression :: proc(r: ^Reader, pkg: ^Package, type_name: string) -> bool {
 	case "FMaterialUniformExpressionVectorParameter":
 		params = 24
 	case "FMaterialUniformExpressionConstant":
-		params = 20
+		// FLinearColor (16) plus the BYTE ValueType
+		params = 17
 	case "FMaterialUniformExpressionPeriodic", "FMaterialUniformExpressionSquareRoot",
 	     "FMaterialUniformExpressionLength", "FMaterialUniformExpressionFloor",
 	     "FMaterialUniformExpressionCeil", "FMaterialUniformExpressionFrac":
 		// one nested expression
 		return skip_uniform_array_element(r, pkg)
+	case "FMaterialUniformExpressionClamp":
+		// Input, Min and Max
+		if !skip_uniform_array_element(r, pkg) || !skip_uniform_array_element(r, pkg) || !skip_uniform_array_element(r, pkg) {
+			return false
+		}
+		return true
+	case "FMaterialUniformExpressionMin", "FMaterialUniformExpressionMax":
+		// A and B
+		return skip_uniform_array_element(r, pkg) && skip_uniform_array_element(r, pkg)
 	case "FMaterialUniformExpressionAppendVector", "FMaterialUniformExpressionFoldedMath":
 		// A, B, then the operator (BYTE) or the component count (INT)
 		if !skip_uniform_array_element(r, pkg) || !skip_uniform_array_element(r, pkg) {
