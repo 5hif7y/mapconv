@@ -121,6 +121,12 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 				interpreted = i64(e.serial_size)
 			}
 			delete(skel_d.items)
+		case "SpeedTree":
+			_, st_d := read_speed_tree(pkg, index, allocator)
+			if !diag.has_errors(&st_d) {
+				interpreted = i64(e.serial_size)
+			}
+			delete(st_d.items)
 		case "BrushComponent":
 			_, bc_d := read_brush_component(pkg, index, allocator)
 			if !diag.has_errors(&bc_d) {
