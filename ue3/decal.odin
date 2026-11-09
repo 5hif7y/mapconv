@@ -5,15 +5,14 @@ import "../diag"
 
 // UDecalComponent (Engine/Src/DecalComponent.cpp) for 576: NumStaticReceivers,
 // then one FStaticReceiverData per receiver (Engine/Src/DecalRenderData.cpp):
-// Component reference, vertex bulk, index bulk, NumTriangles and a LightMap1D
-// reference. ShadowMap1D, Data and InstanceIndex are gated at 666/621/665 and
-// are absent here. The LightMap1D reference is accepted as 4 or 8 bytes; the
-// combination that ends exactly at the export end is the one reported.
+// Component reference, vertex bulk, index bulk, NumTriangles and the LightMap1D
+// reference. The light map is the same reference form as the components:
+// a DWORD kind followed by the 1D/2D payload, so the shared walker is used.
+// ShadowMap1D, Data and InstanceIndex are gated at 666/621/665, i.e. absent.
 Decal_Component :: struct {
 	receivers:  int,
 	vertices:   int,
 	triangles:  int,
-	lightmap_ref: int,
 }
 
 read_decal_component :: proc(
@@ -29,63 +28,58 @@ read_decal_component :: proc(
 	e := pkg.exports[export_index]
 	head, head_d := read_object_head(pkg, e, allocator)
 	if diag.has_errors(&head_d) {
-		// Ownership of the items moves to the caller: deleting them here and
-		// again in the caller is a double free that kills the process.
 		d = head_d
 		return
 	}
 	defer delete(head_d.items)
-	parse :: proc(r: ^Reader, end: int, ref_size: int, res: ^Decal_Component) -> bool {
-		n := read_i32(r)
-		if r.failed || n < 0 || n > 100_000 {
-			return false
-		}
-		res.receivers = int(n)
-		vertices, triangles := 0, 0
-		for _ in 0 ..< int(n) {
-			_ = read_i32(r) // Component
-			stride := read_i32(r)
-			count := read_i32(r)
-			if r.failed || stride <= 0 || stride > 512 || count < 0 || count > 5_000_000 {
-				return false
-			}
-			// i64: stride*count overflows i32 for large (but accepted) counts,
-			// the product wraps negative and the check passes.
-			if i64(stride) * i64(count) > i64(end - r.pos) {
-				return false
-			}
-			r.pos += int(stride) * int(count)
-			vertices += int(count)
-			istride := read_i32(r)
-			icount := read_i32(r)
-			if r.failed || istride != 2 || icount < 0 || icount > 20_000_000 {
-				return false
-			}
-			if i64(icount) * 2 > i64(end - r.pos) {
-				return false
-			}
-			r.pos += int(icount) * 2
-			t := read_i32(r)
-			if r.failed || t < 0 {
-				return false
-			}
-			triangles += int(t)
-			if ref_size > end - r.pos {
-				return false
-			}
-			r.pos += ref_size
-		}
-		res.vertices = vertices
-		res.triangles = triangles
-		res.lightmap_ref = ref_size
-		return true
+	version := engine_version(&pkg.summary)
+	r := Reader{data = pkg.data, pos = head.body_offset, limit = head.end_offset}
+
+	n := read_i32(&r)
+	if r.failed || n < 0 || n > 100_000 {
+		diag.err(&d, "ue3.bad-decal", fmt.aprintf("implausible receiver count %d", n))
+		return
 	}
-	for ref_size in ([]int{4, 8}) {
-		r := Reader{data = pkg.data, pos = head.body_offset, limit = head.end_offset}
-		if parse(&r, head.end_offset, ref_size, &result) && r.pos == head.end_offset {
+	result.receivers = int(n)
+	for _ in 0 ..< int(n) {
+		_ = read_i32(&r) // Component
+		stride := read_i32(&r)
+		count := read_i32(&r)
+		if r.failed || stride <= 0 || stride > 512 || count < 0 || count > 5_000_000 {
+			diag.err(&d, "ue3.bad-decal", "implausible vertex bulk")
+			return
+		}
+		if i64(stride) * i64(count) > i64(r.limit - r.pos) {
+			diag.err(&d, "ue3.bad-decal", "vertex bulk overruns the export")
+			return
+		}
+		r.pos += int(stride) * int(count)
+		result.vertices += int(count)
+		istride := read_i32(&r)
+		icount := read_i32(&r)
+		if r.failed || istride != 2 || icount < 0 || icount > 20_000_000 {
+			diag.err(&d, "ue3.bad-decal", "implausible index bulk")
+			return
+		}
+		if i64(icount) * 2 > i64(r.limit - r.pos) {
+			diag.err(&d, "ue3.bad-decal", "index bulk overruns the export")
+			return
+		}
+		r.pos += int(icount) * 2
+		triangles := read_i32(&r)
+		if r.failed || triangles < 0 {
+			diag.err(&d, "ue3.bad-decal", "implausible triangle count")
+			return
+		}
+		result.triangles += int(triangles)
+		if !skip_lightmap_ref(&r, version) {
+			diag.err(&d, "ue3.bad-decal", "light map did not parse")
 			return
 		}
 	}
-	diag.err(&d, "ue3.decal-layout", "UDecalComponent did not consume the export")
+	if r.pos != head.end_offset {
+		diag.err(&d, "ue3.decal-layout", fmt.aprintf("UDecalComponent consumed %d of %d bytes", r.pos - head.body_offset, head.end_offset - head.body_offset))
+		return
+	}
 	return
 }
