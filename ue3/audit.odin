@@ -103,7 +103,7 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 				interpreted = i64(e.serial_size)
 			}
 			delete(polys_d.items)
-		case "Texture2D", "LightMapTexture2D", "CaptSpriteTexture2D":
+		case "Texture2D", "LightMapTexture2D", "CaptSpriteTexture2D", "TextureFlipBook":
 			texture, texture_d := read_texture(pkg, index)
 			if !diag.has_errors(&texture_d) {
 				interpreted = i64(e.serial_size)
