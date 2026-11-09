@@ -339,3 +339,93 @@ read_material_body :: proc(
 	}
 	return
 }
+
+// FStaticParameterSet::Serialize (MaterialShared.h:1773): a GUID, the static
+// switch array (FName + two UBOOLs + FGuid = 32 B) and the component mask array
+// (FName + five UBOOLs + FGuid = 44 B). The normal and terrain layer arrays are
+// gated at 631/714 and are absent in 576.
+skip_static_parameter_set :: proc(r: ^Reader, version: i32) -> bool {
+	if r.limit - r.pos < 16 {
+		return false
+	}
+	r.pos += 16 // BaseMaterialId
+	switches := read_i32(r)
+	if r.failed || switches < 0 || switches > 100_000 {
+		return false
+	}
+	if i64(switches) * 32 > i64(r.limit - r.pos) {
+		return false
+	}
+	r.pos += int(switches) * 32
+	masks := read_i32(r)
+	if r.failed || masks < 0 || masks > 100_000 {
+		return false
+	}
+	if i64(masks) * 44 > i64(r.limit - r.pos) {
+		return false
+	}
+	r.pos += int(masks) * 44
+	return true
+}
+
+// UMaterialInstance::Serialize (MaterialInstance.cpp:1527): when the instance
+// has a static permutation resource the body holds one material resource block
+// per saved quality plus its static parameter set, and before
+// VER_REMOVED_SHADER_MODEL_2 (711) a second legacy SM2 pair.
+Material_Instance :: struct {
+	blocks: int,
+}
+
+read_material_instance :: proc(
+	pkg: ^Package,
+	export_index: int,
+	allocator := context.allocator,
+) -> (result: Material_Instance, d: diag.Diagnostics) {
+	d = diag.init()
+	if export_index < 0 || export_index >= len(pkg.exports) {
+		diag.err(&d, "ue3.bad-export", fmt.aprintf("export index %d out of range", export_index))
+		return
+	}
+	e := pkg.exports[export_index]
+	head, head_d := read_object_head(pkg, e, allocator)
+	if diag.has_errors(&head_d) {
+		d = head_d
+		return
+	}
+	defer delete(head_d.items)
+	version := engine_version(&pkg.summary)
+	r := Reader{data = pkg.data, pos = head.body_offset, limit = head.end_offset}
+
+	has_resource := false
+	if tag, ok := find_tag(pkg, head.tags, "bHasStaticPermutationResource"); ok {
+		has_resource = tag.bool_value != 0
+	}
+	if has_resource {
+		material: Material_Body
+		if !parse_material_resource(&r, pkg, version, &material) {
+			diag.err(&d, "ue3.bad-material-instance", "static permutation resource did not parse")
+			return
+		}
+		if !skip_static_parameter_set(&r, version) {
+			diag.err(&d, "ue3.bad-material-instance", "static parameter set did not parse")
+			return
+		}
+		result.blocks += 1
+		if version < 711 {
+			if !parse_material_resource(&r, pkg, version, &material) {
+				diag.err(&d, "ue3.bad-material-instance", "legacy SM2 resource did not parse")
+				return
+			}
+			if !skip_static_parameter_set(&r, version) {
+				diag.err(&d, "ue3.bad-material-instance", "legacy SM2 parameter set did not parse")
+				return
+			}
+			result.blocks += 1
+		}
+	}
+	if r.pos != head.end_offset {
+		diag.err(&d, "ue3.material-instance-layout", fmt.aprintf("UMaterialInstance consumed %d of %d bytes", r.pos - head.body_offset, head.end_offset - head.body_offset))
+		return
+	}
+	return
+}

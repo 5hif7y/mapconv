@@ -133,6 +133,12 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 				interpreted = i64(e.serial_size)
 			}
 			delete(stc_d.items)
+		case "MaterialInstanceConstant", "MaterialInstance":
+			_, mi_d := read_material_instance(pkg, index, allocator)
+			if !diag.has_errors(&mi_d) {
+				interpreted = i64(e.serial_size)
+			}
+			delete(mi_d.items)
 		case "Material", "DecalMaterial":
 			_, mat_d := read_material_body(pkg, index, allocator)
 			if !diag.has_errors(&mat_d) {
