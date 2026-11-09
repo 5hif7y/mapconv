@@ -270,6 +270,10 @@ read_u64 :: proc(r: ^Reader) -> u64 {
 	return lo | hi << 32
 }
 
+read_f64 :: proc(r: ^Reader) -> f64 {
+	return transmute(f64)read_u64(r)
+}
+
 read_guid :: proc(r: ^Reader) -> Guid {
 	g: Guid
 	if !need(r, 16) {

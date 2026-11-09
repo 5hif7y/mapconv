@@ -228,6 +228,19 @@ lump_reason :: proc(data: []u8, index, offset, length: int) -> string {
 		return ""
 	case LUMP_LEAF_AMBIENT, LUMP_LEAF_AMBIENT_HDR:
 		return leaf_ambient_reason(data, offset, length)
+	case LUMP_AREAS:
+		return areas_reason(data, offset, length)
+	case LUMP_AREA_PORTALS:
+		return area_portals_reason(data, offset, length)
+	case LUMP_CLIP_PORTAL_VERTS:
+		return vectors_reason(data, offset, length)
+	case LUMP_LEAF_WATER_DATA:
+		return leaf_water_reason(data, offset, length)
+	case LUMP_MAP_FLAGS:
+		if length < 4 {
+			return "shorter than the map flags word"
+		}
+		return ""
 	case LUMP_DISPINFO:
 		if length % 176 != 0 {
 			return "size is not a multiple of 176"
@@ -503,6 +516,93 @@ visibility_reason :: proc(data: []u8, offset, length: int) -> string {
 	for i in 0 ..< length {
 		if !covered[i] {
 			return "bytes outside every stream"
+		}
+	}
+	return ""
+}
+
+// areas_reason: darea_t, eight bytes: the number of portal references that
+// belong to the area and the first one, which must lie in the area portal lump.
+areas_reason :: proc(data: []u8, offset, length: int) -> string {
+	if length % 8 != 0 {
+		return "size is not a multiple of 8"
+	}
+	portals := lump_int(data, LUMP_AREA_PORTALS, 4) / 12
+	for i in 0 ..< length / 8 {
+		count := int(read_i32(data, offset + i * 8))
+		first := int(read_i32(data, offset + i * 8 + 4))
+		if count < 0 || first < 0 {
+			return "negative area portal range"
+		}
+		if count > 0 && first + count > portals {
+			return "area portal range past the portal lump"
+		}
+	}
+	return ""
+}
+
+// area_portals_reason: dareaportal_t, twelve bytes: portal key, the other area,
+// the clip portal vertex run and the plane. Every reference is checked.
+area_portals_reason :: proc(data: []u8, offset, length: int) -> string {
+	if length % 12 != 0 {
+		return "size is not a multiple of 12"
+	}
+	areas := lump_int(data, LUMP_AREAS, 4) / 8
+	planes := lump_int(data, LUMP_PLANES, 4) / 20
+	verts := lump_int(data, LUMP_CLIP_PORTAL_VERTS, 4) / 12
+	for i in 0 ..< length / 12 {
+		base := offset + i * 12
+		other := int(read_u16(data, base + 2))
+		first := int(read_u16(data, base + 4))
+		count := int(read_u16(data, base + 6))
+		plane := int(read_i32(data, base + 8))
+		if areas > 0 && other >= areas {
+			return "other area past the area lump"
+		}
+		if count > 0 && first + count > verts {
+			return "clip vertex run past the vertex lump"
+		}
+		if planes > 0 && (plane < 0 || plane >= planes) {
+			return "plane past the plane lump"
+		}
+	}
+	return ""
+}
+
+// vectors_reason: an array of twelve byte FVector records with finite floats.
+vectors_reason :: proc(data: []u8, offset, length: int) -> string {
+	if length % 12 != 0 {
+		return "size is not a multiple of 12"
+	}
+	for i in 0 ..< length / 12 {
+		for k in 0 ..< 3 {
+			value := read_f32(data, offset + i * 12 + k * 4)
+			if !(value == value) || value > 1e30 || value < -1e30 {
+				return "non-finite vector component"
+			}
+		}
+	}
+	return ""
+}
+
+// leaf_water_reason: twelve bytes per water volume: surface Z, minimum Z and the
+// texinfo of the surface, which must exist in the texinfo lump.
+leaf_water_reason :: proc(data: []u8, offset, length: int) -> string {
+	if length % 12 != 0 {
+		return "size is not a multiple of 12"
+	}
+	texinfo := lump_int(data, LUMP_TEXINFO, 4) / 72
+	for i in 0 ..< length / 12 {
+		base := offset + i * 12
+		for k in 0 ..< 2 {
+			value := read_f32(data, base + k * 4)
+			if !(value == value) || value > 1e30 || value < -1e30 {
+				return "non-finite water plane"
+			}
+		}
+		surface := int(read_i16(data, base + 8))
+		if texinfo > 0 && (surface < 0 || surface >= texinfo) {
+			return "water texinfo past the texinfo lump"
 		}
 	}
 	return ""

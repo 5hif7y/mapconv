@@ -121,6 +121,12 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 				interpreted = i64(e.serial_size)
 			}
 			delete(skel_d.items)
+		case "PersistentCookerData":
+			_, pcd_d := read_persistent_cooker_data(pkg, index, allocator)
+			if !diag.has_errors(&pcd_d) {
+				interpreted = i64(e.serial_size)
+			}
+			delete(pcd_d.items)
 		case "RB_BodySetup":
 			_, setup_d := read_body_setup(pkg, index, allocator)
 			if !diag.has_errors(&setup_d) {
