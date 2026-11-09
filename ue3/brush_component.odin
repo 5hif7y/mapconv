@@ -37,36 +37,55 @@ read_brush_component :: proc(
 	defer delete(head_d.items)
 	r := Reader{data = pkg.data, pos = head.body_offset, limit = head.end_offset}
 
-	sets := read_i32(&r)
-	if r.failed || sets < 0 || sets > 64 {
-		diag.err(&d, "ue3.bad-brush", fmt.aprintf("implausible convex set count %d", sets))
+	ok: bool
+	result.convex_sets, result.elements, result.payload, ok = walk_cached_convex_sets(&r, &d, "brush")
+	if !ok {
 		return
-	}
-	result.convex_sets = int(sets)
-	for _ in 0 ..< int(sets) {
-		elements := read_i32(&r)
-		if r.failed || elements < 0 || elements > 100_000 {
-			diag.err(&d, "ue3.bad-brush", "implausible convex element count")
-			return
-		}
-		for _ in 0 ..< int(elements) {
-			count := read_i32(&r)
-			if r.failed || count < 0 || count > 50_000_000 {
-				diag.err(&d, "ue3.bad-brush", "implausible bulk size")
-				return
-			}
-			if i64(count) > i64(r.limit - r.pos) {
-				diag.err(&d, "ue3.bad-brush", "bulk payload overruns the export")
-				return
-			}
-			r.pos += int(count)
-			result.elements += 1
-			result.payload += i64(count)
-		}
 	}
 	if r.pos != head.end_offset {
 		diag.err(&d, "ue3.brush-layout", fmt.aprintf("UBrushComponent consumed %d of %d bytes", r.pos - head.body_offset, head.end_offset - head.body_offset))
 		return
 	}
+	return
+}
+
+// walk_cached_convex_sets consumes a TArray<FKCachedConvexData> as this build
+// cooks it: a set count, per set an element count, then per element a byte count
+// followed by that many bytes. Both UBrushComponent.CachedPhysBrushData and
+// URB_BodySetup.PreCachedPhysData use it; the payload is a PhysX blob and is
+// skipped, not decoded.
+walk_cached_convex_sets :: proc(
+	r: ^Reader,
+	d: ^diag.Diagnostics,
+	what: string,
+) -> (sets_out: int, elements_out: int, payload_out: i64, ok: bool) {
+	sets := read_i32(r)
+	if r.failed || sets < 0 || sets > 64 {
+		diag.err(d, "ue3.bad-cached-phys", fmt.aprintf("%s: implausible convex set count %d", what, sets))
+		return
+	}
+	sets_out = int(sets)
+	for _ in 0 ..< int(sets) {
+		elements := read_i32(r)
+		if r.failed || elements < 0 || elements > 100_000 {
+			diag.err(d, "ue3.bad-cached-phys", fmt.aprintf("%s: implausible convex element count", what))
+			return
+		}
+		for _ in 0 ..< int(elements) {
+			count := read_i32(r)
+			if r.failed || count < 0 || count > 50_000_000 {
+				diag.err(d, "ue3.bad-cached-phys", fmt.aprintf("%s: implausible bulk size", what))
+				return
+			}
+			if i64(count) > i64(r.limit - r.pos) {
+				diag.err(d, "ue3.bad-cached-phys", fmt.aprintf("%s: bulk payload overruns the export", what))
+				return
+			}
+			r.pos += int(count)
+			elements_out += 1
+			payload_out += i64(count)
+		}
+	}
+	ok = true
 	return
 }
