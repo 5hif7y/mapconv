@@ -428,15 +428,24 @@ index_reason :: proc(data: []u8, index, offset, length: int) -> string {
 // leaf_ambient_reason validates displacement-free leaf ambient cubes: a 24 byte
 // compressed cube (six ColourRGBExp32) plus x, y and z bytes and a zero pad.
 leaf_ambient_reason :: proc(data: []u8, offset, length: int) -> string {
-	if length % 28 != 0 {
-		return "size is not a multiple of 28"
-	}
-	for i in 0 ..< length / 28 {
-		if data[offset + i * 28 + 27] != 0 {
-			return "ambient cube padding is not zero"
+	// Current maps store a 24 byte compressed cube plus x, y, z and a zero pad;
+	// the older maps in the corpus stop after the cube.
+	if length % 28 == 0 {
+		valid := true
+		for i in 0 ..< length / 28 {
+			if data[offset + i * 28 + 27] != 0 {
+				valid = false
+				break
+			}
+		}
+		if valid {
+			return ""
 		}
 	}
-	return ""
+	if length % 24 == 0 {
+		return ""
+	}
+	return "size is not a multiple of 24 or 28"
 }
 
 // visibility_reason decodes the PVS streams. The lump is an int cluster count,
