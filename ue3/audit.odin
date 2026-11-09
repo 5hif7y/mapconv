@@ -121,6 +121,12 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 				interpreted = i64(e.serial_size)
 			}
 			delete(skel_d.items)
+		case "IntProperty", "BoolProperty", "FloatProperty", "StrProperty", "NameProperty", "ObjectProperty", "StructProperty", "ArrayProperty", "ByteProperty", "ComponentProperty", "InterfaceProperty", "DelegateProperty", "MapProperty", "ClassProperty":
+			_, prop_d := read_property(pkg, index, class, allocator)
+			if !diag.has_errors(&prop_d) {
+				interpreted = i64(e.serial_size)
+			}
+			delete(prop_d.items)
 		case "Function":
 			_, fn_d := read_function(pkg, index, allocator)
 			if !diag.has_errors(&fn_d) {
