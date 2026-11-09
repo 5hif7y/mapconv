@@ -121,6 +121,12 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 				interpreted = i64(e.serial_size)
 			}
 			delete(skel_d.items)
+		case "Font":
+			_, font_d := read_font(pkg, index, allocator)
+			if !diag.has_errors(&font_d) {
+				interpreted = i64(e.serial_size)
+			}
+			delete(font_d.items)
 		case "PersistentCookerData":
 			_, pcd_d := read_persistent_cooker_data(pkg, index, allocator)
 			if !diag.has_errors(&pcd_d) {
