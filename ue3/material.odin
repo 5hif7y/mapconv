@@ -147,3 +147,171 @@ material_vmt_for :: proc(mat_name: string, info: Material_Texture) -> string {
 material_vmt :: proc(info: Material_Texture) -> string {
 	return material_vmt_for(info.material_name, info)
 }
+
+// FMaterial::Serialize (Engine/Src/MaterialShared.cpp:1949) for 576: the
+// payload repeats one FMaterialResource block per saved quality level (the
+// measured exports carry two identical-sized blocks). Each block stores the
+// compile errors, the texture dependency map, the material GUID, the legacy
+// uniform expression arrays (the shader cache took them over at 656) and the
+// texture lookup table.
+Material_Body :: struct {
+	blocks:          int,
+	expressions:     int,
+	texture_lookups: int,
+}
+
+// skip_expression walks one FMaterialUniformExpression given its type name.
+// Composed expressions (FoldedMath, AppendVector) recurse on their operands.
+skip_expression :: proc(r: ^Reader, pkg: ^Package, type_name: string) -> bool {
+	params: int
+	switch type_name {
+	case "FMaterialUniformExpressionTime", "FMaterialUniformExpressionRealTime":
+		params = 0
+	case "FMaterialUniformExpressionTexture":
+		params = 4
+	case "FMaterialUniformExpressionTextureParameter":
+		params = 12
+	case "FMaterialUniformExpressionScalarParameter":
+		params = 12
+	case "FMaterialUniformExpressionVectorParameter":
+		params = 24
+	case "FMaterialUniformExpressionConstant":
+		params = 20
+	case "FMaterialUniformExpressionPeriodic", "FMaterialUniformExpressionSquareRoot",
+	     "FMaterialUniformExpressionLength", "FMaterialUniformExpressionFloor",
+	     "FMaterialUniformExpressionCeil", "FMaterialUniformExpressionFrac":
+		// one nested expression
+		return skip_uniform_array_element(r, pkg)
+	case "FMaterialUniformExpressionAppendVector", "FMaterialUniformExpressionFoldedMath":
+		// A, B, then a BYTE (operator or component count)
+		if !skip_uniform_array_element(r, pkg) || !skip_uniform_array_element(r, pkg) {
+			return false
+		}
+		if r.limit - r.pos < 1 {
+			return false
+		}
+		r.pos += 1
+		return true
+	case:
+		return false
+	}
+	if i64(params) > i64(r.limit - r.pos) {
+		return false
+	}
+	r.pos += params
+	return true
+}
+
+// skip_uniform_array_element reads one element: its type name then parameters.
+skip_uniform_array_element :: proc(r: ^Reader, pkg: ^Package) -> bool {
+	type_name := name_text(pkg, read_name_ref(r))
+	if r.failed {
+		return false
+	}
+	return skip_expression(r, pkg, type_name)
+}
+
+// skip_uniform_array walks one legacy expression array. Each element is an
+// FName type followed by that type's parameters (MaterialShared.cpp:1104).
+skip_uniform_array :: proc(r: ^Reader, pkg: ^Package, result: ^Material_Body) -> bool {
+	count := read_i32(r)
+	if r.failed || count < 0 || count > 100_000 {
+		return false
+	}
+	result.expressions += int(count)
+	for _ in 0 ..< int(count) {
+		if !skip_uniform_array_element(r, pkg) {
+			return false
+		}
+	}
+	return true
+}
+
+// parse_material_resource consumes one FMaterialResource block.
+parse_material_resource :: proc(r: ^Reader, pkg: ^Package, version: i32, result: ^Material_Body) -> bool {
+	errors := read_i32(r)
+	if r.failed || errors < 0 || errors > 100_000 {
+		return false
+	}
+	for _ in 0 ..< int(errors) {
+		_ = read_fstring(r)
+		if r.failed {
+			return false
+		}
+	}
+	deps := read_i32(r)
+	if r.failed || deps < 0 || deps > 1_000_000 || i64(deps) * 8 > i64(r.limit - r.pos) {
+		return false
+	}
+	r.pos += int(deps) * 8
+	if r.limit - r.pos < 24 {
+		return false
+	}
+	r.pos += 4  // MaxTextureDependencyLength
+	r.pos += 16 // Id (FGuid)
+	r.pos += 4  // NumUserTexCoords
+
+	if !skip_uniform_array(r, pkg, result) ||
+	   !skip_uniform_array(r, pkg, result) ||
+	   !skip_uniform_array(r, pkg, result) ||
+	   !skip_uniform_array(r, pkg, result) {
+		return false
+	}
+	if r.limit - r.pos < 16 {
+		return false
+	}
+	r.pos += 4 // bUsesSceneColor
+	r.pos += 4 // bUsesSceneDepth
+	if version >= 558 {
+		r.pos += 4 // bUsesDynamicParameter
+	}
+	r.pos += 4 // UsingTransforms
+	lookups := read_i32(r)
+	if r.failed || lookups < 0 || lookups > 1_000_000 {
+		return false
+	}
+	stride := 16
+	if version < 506 {
+		stride = 12
+	}
+	if i64(lookups) * i64(stride) + 4 > i64(r.limit - r.pos) {
+		return false
+	}
+	r.pos += int(lookups) * stride
+	result.texture_lookups += int(lookups)
+	r.pos += 4 // DummyDroppedFallbackComponents
+	return true
+}
+
+read_material_body :: proc(
+	pkg: ^Package,
+	export_index: int,
+	allocator := context.allocator,
+) -> (result: Material_Body, d: diag.Diagnostics) {
+	d = diag.init()
+	if export_index < 0 || export_index >= len(pkg.exports) {
+		diag.err(&d, "ue3.bad-export", fmt.aprintf("export index %d out of range", export_index))
+		return
+	}
+	e := pkg.exports[export_index]
+	head, head_d := read_object_head(pkg, e, allocator)
+	if diag.has_errors(&head_d) {
+		d = head_d
+		return
+	}
+	defer delete(head_d.items)
+	version := engine_version(&pkg.summary)
+	r := Reader{data = pkg.data, pos = head.body_offset, limit = head.end_offset}
+	for r.pos < head.end_offset {
+		if !parse_material_resource(&r, pkg, version, &result) {
+			diag.err(&d, "ue3.bad-material", fmt.aprintf("material resource did not parse at %d", r.pos))
+			return
+		}
+		result.blocks += 1
+		if result.blocks > 8 {
+			diag.err(&d, "ue3.bad-material", "too many resource blocks")
+			return
+		}
+	}
+	return
+}

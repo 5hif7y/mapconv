@@ -121,6 +121,12 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 				interpreted = i64(e.serial_size)
 			}
 			delete(skel_d.items)
+		case "Material":
+			_, mat_d := read_material_body(pkg, index, allocator)
+			if !diag.has_errors(&mat_d) {
+				interpreted = i64(e.serial_size)
+			}
+			delete(mat_d.items)
 		case "ModelComponent":
 			_, mc_d := read_model_component(pkg, index, allocator)
 			if !diag.has_errors(&mc_d) {
