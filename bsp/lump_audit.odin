@@ -158,7 +158,7 @@ lump_reason :: proc(data: []u8, index, offset, length: int) -> string {
 		return ""
 	case LUMP_LIGHTING, LUMP_LIGHTING_HDR:
 		return lighting_reason(data, index, offset, length)
-	case LUMP_PHYSCOLLIDE:
+	case LUMP_PHYSCOLLIDE, LUMP_PHYSCOLLIDESURFACE:
 		return phys_collide_reason(data, offset, length)
 	case LUMP_PAKFILE:
 		// An archive with no entries still carries an end record, which is
@@ -198,6 +198,36 @@ lump_reason :: proc(data: []u8, index, offset, length: int) -> string {
 		return ""
 	case LUMP_GAMELUMP:
 		return game_lump_reason(data, offset, length)
+	case LUMP_VISIBILITY:
+		return visibility_reason(data, offset, length)
+	case LUMP_VERTNORMALS:
+		if length % 12 != 0 {
+			return "size is not a multiple of 12"
+		}
+		return ""
+	case LUMP_FACEIDS:
+		if length % 2 != 0 {
+			return "size is not a multiple of 2"
+		}
+		return ""
+	case LUMP_VERTNORMALINDICES, LUMP_LEAFS_FACES, LUMP_PRIMINDICES:
+		if length % 2 != 0 {
+			return "size is not a multiple of 2"
+		}
+		return index_reason(data, index, offset, length)
+	case LUMP_FACE_MACRO_TEXTURE_INFO:
+		// One macro texture id per face, in face order.
+		if length % 2 != 0 {
+			return "size is not a multiple of 2"
+		}
+		if length / 2 != lump_int(data, LUMP_FACES, 4) / 56 {
+			return "count does not match the face lump"
+		}
+		return ""
+	case LUMP_DISP_LIGHTMAP_ALPHAS:
+		return ""
+	case LUMP_LEAF_AMBIENT, LUMP_LEAF_AMBIENT_HDR:
+		return leaf_ambient_reason(data, offset, length)
 	case LUMP_DISPINFO:
 		if length % 176 != 0 {
 			return "size is not a multiple of 176"
@@ -374,4 +404,97 @@ lump_int :: proc(data: []u8, index, field: int) -> int {
 		return 0
 	}
 	return int(read_i32(data, base + field))
+}
+
+// index_reason validates a 16 bit index array against the lump it refers to.
+index_reason :: proc(data: []u8, index, offset, length: int) -> string {
+	reference, stride := LUMP_FACES, 56
+	switch index {
+	case LUMP_VERTNORMALINDICES:
+		reference, stride = LUMP_VERTNORMALS, 12
+	case LUMP_PRIMINDICES:
+		reference, stride = LUMP_PRIMVERTS, 0
+	}
+	count := lump_int(data, reference, 4) / max(stride, 1)
+	for i in 0 ..< length / 2 {
+		value := int(read_u16(data, offset + i * 2))
+		if value < 0 || (count > 0 && value >= count) {
+			return "index past the referenced lump"
+		}
+	}
+	return ""
+}
+
+// leaf_ambient_reason validates displacement-free leaf ambient cubes: a 24 byte
+// compressed cube (six ColourRGBExp32) plus x, y and z bytes and a zero pad.
+leaf_ambient_reason :: proc(data: []u8, offset, length: int) -> string {
+	if length % 28 != 0 {
+		return "size is not a multiple of 28"
+	}
+	for i in 0 ..< length / 28 {
+		if data[offset + i * 28 + 27] != 0 {
+			return "ambient cube padding is not zero"
+		}
+	}
+	return ""
+}
+
+// visibility_reason decodes the PVS streams. The lump is an int cluster count,
+// two byte offsets per cluster, then run length encoded bit vectors; the streams
+// must decode to (clusters + 7) / 8 bytes and tile the lump exactly.
+visibility_reason :: proc(data: []u8, offset, length: int) -> string {
+	if length < 4 {
+		return "shorter than the cluster count"
+	}
+	clusters := int(read_i32(data, offset))
+	if clusters < 0 || clusters > 1_000_000 {
+		return "implausible cluster count"
+	}
+	header := 4 + clusters * 8
+	if header > length {
+		return "cluster table past the lump"
+	}
+	need := (clusters + 7) / 8
+	covered := make([]bool, length, context.allocator)
+	defer delete(covered)
+	for i in 0 ..< header {
+		covered[i] = true
+	}
+	for i in 0 ..< clusters * 2 {
+		start := int(read_i32(data, offset + 4 + i * 4))
+		if start < header || start >= length {
+			return "stream offset outside the data region"
+		}
+		pos := start
+		produced := 0
+		for produced < need {
+			if pos >= length {
+				return "run length stream past the lump"
+			}
+			value := int(data[offset + pos])
+			pos += 1
+			if value != 0 {
+				produced += 1
+			} else {
+				if pos >= length {
+					return "run length count past the lump"
+				}
+				run := int(data[offset + pos])
+				pos += 1
+				produced += run
+			}
+		}
+		if produced != need {
+			return "stream decoded past the bit vector"
+		}
+		for k in start ..< pos {
+			covered[k] = true
+		}
+	}
+	for i in 0 ..< length {
+		if !covered[i] {
+			return "bytes outside every stream"
+		}
+	}
+	return ""
 }
