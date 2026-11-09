@@ -121,6 +121,12 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 				interpreted = i64(e.serial_size)
 			}
 			delete(skel_d.items)
+		case "SoundCue":
+			_, sc_d := read_sound_cue(pkg, index, allocator)
+			if !diag.has_errors(&sc_d) {
+				interpreted = i64(e.serial_size)
+			}
+			delete(sc_d.items)
 		case "SpeedTreeComponent":
 			_, stc_d := read_speed_tree_component(pkg, index, allocator)
 			if !diag.has_errors(&stc_d) {
