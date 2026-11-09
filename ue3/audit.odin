@@ -134,6 +134,11 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 			}
 			delete(struct_d.items)
 		case "State":
+			_, state_d := read_state(pkg, index, allocator)
+			if !diag.has_errors(&state_d) {
+				interpreted = i64(e.serial_size)
+			}
+			delete(state_d.items)
 			_, struct_d := read_script_struct(pkg, index, allocator)
 			if !diag.has_errors(&struct_d) {
 				interpreted = i64(e.serial_size)

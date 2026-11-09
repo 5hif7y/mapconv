@@ -30,6 +30,7 @@ Script_Kind :: enum {
 	Plain,
 	Script_Struct,
 	Function,
+	State_Obj,
 }
 
 Script_Body :: struct {
@@ -45,6 +46,17 @@ read_script_struct :: proc(
 	allocator := context.allocator,
 ) -> (result: Script_Body, d: diag.Diagnostics) {
 	return read_script(pkg, export_index, .Plain, allocator)
+}
+
+// UState::Serialize (UnClass.cpp:1876) adds, after the UStruct body, the two
+// legacy probe masks (version < 691), LabelTableOffset, StateFlags and the
+// function map (an FName to UFunction reference map, twelve bytes per pair).
+read_state :: proc(
+	pkg: ^Package,
+	export_index: int,
+	allocator := context.allocator,
+) -> (result: Script_Body, d: diag.Diagnostics) {
+	return read_script(pkg, export_index, .State_Obj, allocator)
 }
 
 // UScriptStruct::Serialize (UnClass.cpp:1763) appends StructFlags and then the
@@ -109,6 +121,35 @@ read_script :: proc(
 	}
 	r.pos += int(bytecode)
 	result.bytecode = int(bytecode)
+	if kind == .State_Obj {
+		if version < 691 {
+			_ = read_u64(&r) // legacy ProbeMask
+			_ = read_u64(&r) // legacy IgnoreMask
+		} else {
+			_ = read_u32(&r) // ProbeMask
+		}
+		_ = read_u16(&r) // LabelTableOffset
+		_ = read_u32(&r) // StateFlags
+		functions := read_i32(&r)
+		if r.failed || functions < 0 || i64(functions) * 12 > i64(r.limit - r.pos) {
+			diag.err(&d, "ue3.bad-state", fmt.aprintf("implausible state function count %d", functions))
+			return
+		}
+		for _ in 0 ..< int(functions) {
+			name_index := read_i32(&r)
+			_ = read_i32(&r)
+			_ = read_i32(&r)
+			if r.failed || name_index < -1 || int(name_index) > len(pkg.names) {
+				diag.err(&d, "ue3.bad-state", "state function map entry is out of range")
+				return
+			}
+		}
+		if r.pos != head.end_offset {
+			diag.err(&d, "ue3.state-layout", fmt.aprintf("UState consumed %d of %d bytes", r.pos - head.body_offset, head.end_offset - head.body_offset))
+			return
+		}
+		return
+	}
 	if kind == .Script_Struct {
 		result.flags = read_u32(&r)
 		tags := read_tag_stream(pkg, &r, head.end_offset, int(e.serial_size), allocator, &d)
