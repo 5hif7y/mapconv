@@ -180,7 +180,9 @@ skip_expression :: proc(r: ^Reader, pkg: ^Package, type_name: string) -> bool {
 		params = 17
 	case "FMaterialUniformExpressionPeriodic", "FMaterialUniformExpressionSquareRoot",
 	     "FMaterialUniformExpressionLength", "FMaterialUniformExpressionFloor",
-	     "FMaterialUniformExpressionCeil", "FMaterialUniformExpressionFrac":
+	     "FMaterialUniformExpressionCeil", "FMaterialUniformExpressionFrac",
+	     "FMaterialUniformExpressionAbs", "FMaterialUniformExpressionSign",
+	     "FMaterialUniformExpressionOneMinus", "FMaterialUniformExpressionSaturate":
 		// one nested expression
 		return skip_uniform_array_element(r, pkg)
 	case "FMaterialUniformExpressionClamp":
@@ -217,6 +219,7 @@ skip_expression :: proc(r: ^Reader, pkg: ^Package, type_name: string) -> bool {
 		r.pos += 4
 		return true
 	case:
+		reader_fail(r, fmt.aprintf("unknown uniform expression type %s", type_name))
 		return false
 	}
 	if i64(params) > i64(r.limit - r.pos) {
@@ -328,7 +331,7 @@ read_material_body :: proc(
 	r := Reader{data = pkg.data, pos = head.body_offset, limit = head.end_offset}
 	for r.pos < head.end_offset {
 		if !parse_material_resource(&r, pkg, version, &result) {
-			diag.err(&d, "ue3.bad-material", fmt.aprintf("material resource did not parse at %d", r.pos))
+			diag.err(&d, "ue3.bad-material", fmt.aprintf("material resource did not parse at %d (%s)", r.pos, r.message))
 			return
 		}
 		result.blocks += 1
