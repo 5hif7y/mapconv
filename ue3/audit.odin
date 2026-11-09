@@ -127,6 +127,18 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 				interpreted = i64(e.serial_size)
 			}
 			delete(prop_d.items)
+		case "Const":
+			const_d := read_const(pkg, index, allocator)
+			if !diag.has_errors(&const_d) {
+				interpreted = i64(e.serial_size)
+			}
+			delete(const_d.items)
+		case "Enum":
+			enum_d := read_enum(pkg, index, allocator)
+			if !diag.has_errors(&enum_d) {
+				interpreted = i64(e.serial_size)
+			}
+			delete(enum_d.items)
 		case "Function":
 			_, fn_d := read_function(pkg, index, allocator)
 			if !diag.has_errors(&fn_d) {
