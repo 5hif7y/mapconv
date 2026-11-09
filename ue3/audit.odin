@@ -121,6 +121,12 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 				interpreted = i64(e.serial_size)
 			}
 			delete(skel_d.items)
+		case "BrushComponent":
+			_, bc_d := read_brush_component(pkg, index, allocator)
+			if !diag.has_errors(&bc_d) {
+				interpreted = i64(e.serial_size)
+			}
+			delete(bc_d.items)
 		case "SoundCue":
 			_, sc_d := read_sound_cue(pkg, index, allocator)
 			if !diag.has_errors(&sc_d) {
