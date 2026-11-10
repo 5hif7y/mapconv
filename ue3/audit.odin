@@ -176,6 +176,14 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 				interpreted = i64(e.serial_size)
 			}
 			delete(struct_d.items)
+		case "FracturedStaticMesh":
+			_, fractured_d := read_fractured_static_mesh(pkg, index, allocator)
+			if !diag.has_errors(&fractured_d) {
+				interpreted = i64(e.serial_size)
+			} else if len(fractured_d.items) > 0 {
+				detail = fractured_d.items[0].message
+			}
+			delete(fractured_d.items)
 		case "ShadowMap1D":
 			_, shadow_d := read_shadow_map_1d(pkg, index, allocator)
 			if !diag.has_errors(&shadow_d) {

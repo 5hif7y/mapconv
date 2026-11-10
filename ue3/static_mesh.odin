@@ -75,6 +75,9 @@ Static_Mesh :: struct {
 	body_setup:       i32,
 	internal_version: i32,
 	lods:             []Static_Mesh_Lod,
+	// body_end is the offset just past the static mesh part. Subclasses such as
+	// FracturedStaticMesh continue after it, so it is exported for them.
+	body_end:         int,
 }
 
 // export_is_static_mesh reports whether an export's class is StaticMesh.
@@ -162,6 +165,7 @@ read_static_mesh :: proc(
 		}
 		mesh.lods[i] = lod
 	}
+	mesh.body_end = r.pos
 	return
 }
 
