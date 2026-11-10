@@ -255,6 +255,14 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 				detail = light_d.items[0].message
 			}
 			delete(light_d.items)
+		case "Terrain":
+			_, terr_d := read_terrain(pkg, index, allocator)
+			if !diag.has_errors(&terr_d) {
+				interpreted = i64(e.serial_size)
+			} else if len(terr_d.items) > 0 && detail == "" {
+				detail = terr_d.items[0].message
+			}
+			delete(terr_d.items)
 		case "TerrainComponent":
 			terrain, terrain_d := read_terrain_component(pkg, index, allocator)
 			if !diag.has_errors(&terrain_d) {
