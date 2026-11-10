@@ -337,6 +337,48 @@ read_texture_cube :: proc(
 	return
 }
 
+// read_shadow_map_1d covers the SpeedTree shadow map: a sample count, one float
+// per sample and the sixteen byte light case guid. Measured on the single object
+// of the corpus: 414 samples, then the guid, and the body ends exactly there.
+read_shadow_map_1d :: proc(
+	pkg: ^Package,
+	export_index: int,
+	allocator := context.allocator,
+) -> (samples: int, d: diag.Diagnostics) {
+	d = diag.init()
+	if export_index < 0 || export_index >= len(pkg.exports) {
+		diag.err(&d, "ue3.bad-export", fmt.aprintf("export index %d out of range", export_index))
+		return
+	}
+	e := pkg.exports[export_index]
+	head, head_d := read_object_head(pkg, e, allocator)
+	if diag.has_errors(&head_d) {
+		d = head_d
+		return
+	}
+	defer delete(head_d.items)
+	r := Reader{data = pkg.data, pos = head.body_offset, limit = head.end_offset}
+	count := read_i32(&r)
+	if r.failed || count <= 0 || count > 65_536 {
+		diag.err(&d, "ue3.bad-texture", fmt.aprintf("implausible shadow sample count %d", count))
+		return
+	}
+	for i in 0 ..< int(count) {
+		value := read_f32(&r)
+		if !(value == value) || value > 1e30 || value < -1e30 {
+			diag.err(&d, "ue3.bad-texture", fmt.aprintf("shadow sample %d is not finite", i))
+			return
+		}
+	}
+	if head.end_offset - r.pos != 16 {
+		diag.err(&d, "ue3.bad-texture", fmt.aprintf("shadow map leaves %d bytes for the guid", head.end_offset - r.pos))
+		return
+	}
+	r.pos += 16
+	samples = int(count)
+	return
+}
+
 // DDS_INFO maps a UE3 pixel format name to the DDS pixel format.
 Dds_Format :: enum {
 	Unknown,

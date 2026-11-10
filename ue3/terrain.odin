@@ -123,6 +123,44 @@ read_terrain_component :: proc(
 		diag.err(&d, "ue3.bad-terrain", fmt.aprintf("unexpected light map type %d", light_map_type))
 		return
 	}
-	terrain.tail_bytes = left
+	// FLightMap::Serialize writes the light case guids (UnLightMap.cpp:75) and
+	// FLightMap2D continues with one texture reference and one scale vector per
+	// stored coefficient plus the coordinate transform (UnLightMap.cpp:1902).
+	// This build stores four coefficients, so the block is: type, guid count and
+	// guid, four {reference, three floats}, then sixteen bytes of coordinates.
+	guids := read_i32(&r)
+	if r.failed || guids < 0 || guids > 16 {
+		diag.err(&d, "ue3.bad-terrain", fmt.aprintf("implausible light guid count %d", guids))
+		return
+	}
+	for _ in 0 ..< int(guids) * 4 {
+		_ = read_i32(&r)
+	}
+	for coefficient in 0 ..< 4 {
+		reference := read_i32(&r)
+		if r.failed || !valid_object_reference(pkg, reference) {
+			diag.err(&d, "ue3.bad-terrain", fmt.aprintf("light map coefficient %d points at %d", coefficient, reference))
+			return
+		}
+		for _ in 0 ..< 3 {
+			value := read_f32(&r)
+			if !(value == value) {
+				diag.err(&d, "ue3.bad-terrain", fmt.aprintf("light map coefficient %d holds a non-finite scale", coefficient))
+				return
+			}
+		}
+	}
+	for _ in 0 ..< 4 {
+		value := read_f32(&r)
+		if !(value == value) {
+			diag.err(&d, "ue3.bad-terrain", "non-finite light map coordinate")
+			return
+		}
+	}
+	if r.pos != head.end_offset {
+		diag.err(&d, "ue3.bad-terrain", fmt.aprintf("light map block consumed %d of %d bytes", r.pos - (head.end_offset - left), left))
+		return
+	}
+	terrain.tail_bytes = 0
 	return
 }

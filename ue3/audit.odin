@@ -176,6 +176,14 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 				interpreted = i64(e.serial_size)
 			}
 			delete(struct_d.items)
+		case "ShadowMap1D":
+			_, shadow_d := read_shadow_map_1d(pkg, index, allocator)
+			if !diag.has_errors(&shadow_d) {
+				interpreted = i64(e.serial_size)
+			} else if len(shadow_d.items) > 0 {
+				detail = shadow_d.items[0].message
+			}
+			delete(shadow_d.items)
 		case "TextureCube":
 			cube_offset, cube_d := read_texture_cube(pkg, index, allocator)
 
