@@ -134,6 +134,29 @@ basetexture_of :: proc(text: string) -> (name: string, ok: bool) {
 	return rest[:close_at], true
 }
 
+// include_of returns the material a "patch" VMT builds on. A patch does not name a
+// texture of its own: it includes another material and replaces some of its keys,
+// which is how the compiler writes the per-instance variants it bakes into a map.
+include_of :: proc(text: string) -> (path: string, ok: bool) {
+	lower := strings.to_lower(text, context.temp_allocator)
+	key := "\"include\""
+	at := strings.index(lower, key)
+	if at < 0 {
+		return "", false
+	}
+	rest := text[at + len(key):]
+	open := strings.index(rest, "\"")
+	if open < 0 {
+		return "", false
+	}
+	rest = rest[open + 1:]
+	close_at := strings.index(rest, "\"")
+	if close_at < 0 {
+		return "", false
+	}
+	return rest[:close_at], true
+}
+
 // material_report_text renders the split for inspect and extract.
 material_report_text :: proc(report: Mat_Report) -> string {
 	if report.in_vpk > 0 || report.nowhere > 0 {

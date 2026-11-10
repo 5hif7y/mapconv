@@ -215,6 +215,10 @@ archive_path :: proc(tree: ^Tree, archive: u16, allocator := context.allocator) 
 	if strings.has_suffix(stem, "_dir") {
 		stem = stem[:len(stem) - 4]
 	}
+	directory := filepath.dir(tree.dir_path)
+	if len(directory) > 0 {
+		return fmt.aprintf("%s/%s_%03d.vpk", directory, stem, archive, allocator = allocator), false
+	}
 	return fmt.aprintf("%s_%03d.vpk", stem, archive, allocator = allocator), false
 }
 
