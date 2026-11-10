@@ -14,6 +14,7 @@ import "core:fmt"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
+import "assets"
 import "bsp"
 import "convert"
 import "diag"
@@ -44,7 +45,8 @@ Options:
                        unreal3-to-source1)
   --report <file>      write the diagnostic report to a file as well as stderr
   --content <dir>      cooked content directory for mesh imports, or the game root
-                       (or a _dir.vpk) whose VPKs the material report resolves
+                       (or a _dir.vpk) whose VPKs resolve the materials: convert and
+                       extract write each material's texture as DDS next to the output
   --quiet              only print errors
   --no-materials       skip the per-material notes
 
@@ -226,7 +228,8 @@ run_convert :: proc(args: Args, text: string) {
 
 	source := args.from
 	if source == .Unknown {
-		source, _ = convert.detect_format(args.input, text)
+		detected, _ := convert.detect_format(args.input, text)
+		source = detected
 	}
 	if target == .UE3_Package {
 		fmt.eprintln("mapconv: UE3 packages are not an output format; write a .t3d for UnrealEd instead")
@@ -257,6 +260,81 @@ run_convert :: proc(args: Args, text: string) {
 		os.exit(2)
 	}
 	fmt.printfln("wrote %s (%d bytes)", args.output, len(result.output))
+
+	// Converting a Source map without its textures leaves every surface named but
+	// blank, so the textures travel next to the output whenever the caller says
+	// where the game is, and the faces that stay blank are counted, not guessed.
+	if args.content != "" && source == .Source_BSP {
+		texture_parity(args, text, &result.doc)
+	}
+}
+
+// texture_parity writes the textures of a converted Source map and reports how many
+// polygons end up pointing at one. The 1:1 condition for a conversion is that every
+// face names a texture that exists in the output, so the count is printed as the
+// measure of the conversion and not as a decoration.
+texture_parity :: proc(args: Args, text: string, doc: ^ir.Document) {
+	trees, have_trees := content_trees(args.content)
+	defer {
+		for &tree in trees {
+			vpk.destroy(&tree)
+		}
+		delete(trees)
+	}
+	if !have_trees {
+		return
+	}
+	output := filepath.dir(args.output)
+	if output == "" {
+		output = "."
+	}
+	result, ok := assets.export(transmute([]u8)text, filepath.stem(args.input), output, trees)
+	if !ok {
+		return
+	}
+	defer assets.destroy(&result)
+	fmt.println(assets.report_text(&result))
+
+	faces, textured, nodraw := 0, 0, 0
+	blank := make(map[string]int, 4, context.temp_allocator)
+	for brush in doc.brushes {
+		for face in brush.faces {
+			faces += 1
+			if face.material == "" {
+				blank["(no material)"] += 1
+				continue
+			}
+			name := strings.to_lower(face.material, context.temp_allocator)
+			if result.have[name] {
+				textured += 1
+			} else if is_nodraw(name) {
+				// A tool material marks a face that must not be drawn, so its lack of
+				// a texture is the intent and not a gap in the conversion.
+				nodraw += 1
+			} else {
+				blank[name] += 1
+			}
+		}
+	}
+	share := faces == 0 ? 100.0 : 100.0 * f64(textured) / f64(faces)
+	fmt.printfln("faces: %d of %d name a texture that travels with the map (%.2f %%, %d more are nodraw by design)",
+		textured, faces, share, nodraw)
+	if len(blank) > 0 {
+		names := strings.builder_make(0, 96)
+		listed := 0
+		for name in blank {
+			if listed == 4 {
+				strings.write_string(&names, " …")
+				break
+			}
+			if listed > 0 {
+				strings.write_string(&names, ", ")
+			}
+			fmt.sbprintf(&names, "%s×%d", name, blank[name])
+			listed += 1
+		}
+		fmt.printfln("faces without one: %s", strings.to_string(names))
+	}
 }
 
 run_inspect :: proc(args: Args, text: string) {
@@ -411,6 +489,7 @@ resolve_materials :: proc(report: ^bsp.Mat_Report, trees: []vpk.Tree) {
 // game VPK after. It is the step that turns "the map names this material" into a
 // texture a converter can use.
 world_textures :: proc(args: Args, data: []u8, file: ^bsp.File) {
+	_ = file
 	trees, have_trees := content_trees(args.content)
 	defer {
 		for &tree in trees {
@@ -418,184 +497,15 @@ world_textures :: proc(args: Args, data: []u8, file: ^bsp.File) {
 		}
 		delete(trees)
 	}
-	offset, length := file.header[bsp.LUMP_PAKFILE][0], file.header[bsp.LUMP_PAKFILE][1]
-	entries, pak_d := bsp.read_pakfile(data, offset, length)
-	defer {
-		for entry in entries {
-			delete(entry.name)
-		}
-		delete(entries)
-		delete(pak_d.items)
-	}
-	pak_index := make(map[string]int, len(entries), context.allocator)
-	defer {
-		for key in pak_index {
-			delete(key)
-		}
-		delete(pak_index)
-	}
-	for entry, i in entries {
-		pak_index[strings.to_lower(entry.name, context.allocator)] = i
-	}
-	map_name := strings.to_lower(filepath.stem(args.input), context.temp_allocator)
-
-	// asset returns a fresh buffer for a path, from the pakfile or any VPK.
-	asset :: proc(data: []u8, entries: []bsp.Pak_Entry, index: map[string]int, trees: []vpk.Tree, path: string, d: ^diag.Diagnostics) -> (payload: []u8, ok: bool) {
-		if slot, packed := index[path]; packed {
-			bytes, entry_ok := bsp.pak_entry_data(data, entries[slot])
-			if !entry_ok {
-				return nil, false
-			}
-			if entries[slot].method == 8 {
-				return bytes, true
-			}
-			return slices_clone(bytes), true
-		}
-		for &tree in trees {
-			entry, _, found := vpk.lookup(&tree, path)
-			if !found {
-				continue
-			}
-			bytes, read_ok, read_d := vpk.read_entry(&tree, entry)
-			delete(read_d.items)
-			if read_ok {
-				return bytes, true
-			}
-		}
-		return nil, false
-	}
-
-	converted := 0
-	missing := 0
-	missing_names := make([dynamic]string, 0, 16, context.allocator)
-	defer {
-		for name in missing_names {
-			delete(name)
-		}
-		delete(missing_names)
-	}
-	seen := make(map[string]bool, 256, context.allocator)
-	defer {
-		for key in seen {
-			delete(key)
-		}
-		delete(seen)
-	}
-	for info in file.texinfo {
-		if info.texdata < 0 || info.texdata >= len(file.texdata) {
-			continue
-		}
-		name := strings.to_lower(file.texdata[info.texdata].name, context.allocator)
-		if name == "" || name in seen {
-			delete(name)
-			continue
-		}
-		seen[name] = true
-		vmt, vmt_ok := asset(data, entries, pak_index, trees, fmt.aprintf("materials/%s.vmt", name, allocator = context.temp_allocator), &diag.Diagnostics{})
-		if !vmt_ok {
-			// The compiler moves the materials a map uses into the map's own folder.
-			vmt, vmt_ok = asset(data, entries, pak_index, trees, fmt.aprintf("materials/maps/%s/%s.vmt", map_name, name, allocator = context.temp_allocator), &diag.Diagnostics{})
-		}
-		if !vmt_ok {
-			if stripped, changed := strip_variant_suffix(name); changed {
-				vmt, vmt_ok = asset(data, entries, pak_index, trees, fmt.aprintf("materials/%s.vmt", stripped, allocator = context.temp_allocator), &diag.Diagnostics{})
-				if !vmt_ok {
-					vmt, vmt_ok = asset(data, entries, pak_index, trees, fmt.aprintf("materials/maps/%s/%s.vmt", map_name, stripped, allocator = context.temp_allocator), &diag.Diagnostics{})
-				}
-			}
-		}
-		if !vmt_ok {
-			missing += 1
-			append(&missing_names, strings.clone(name, context.allocator))
-			continue
-		}
-		base, has_base := bsp.basetexture_of(string(vmt))
-		// A patch includes another material instead of naming a texture; follow the
-		// include chain, which the compiler nests for per-instance variants. The
-		// buffer is only released once a replacement has been read: freeing it
-		// first and then breaking out of the loop frees it twice.
-		if !has_base {
-			for _ in 0 ..< 4 {
-				include, has_include := bsp.include_of(string(vmt))
-				if !has_include {
-					break
-				}
-				next := strings.to_lower(include, context.temp_allocator)
-				next_path := strings.has_prefix(next, "materials/") ? next : fmt.aprintf("materials/%s", next, allocator = context.temp_allocator)
-				replacement, replacement_ok := asset(data, entries, pak_index, trees, next_path, &diag.Diagnostics{})
-				if !replacement_ok {
-					break
-				}
-				delete(vmt)
-				vmt = replacement
-				base, has_base = bsp.basetexture_of(string(vmt))
-				if has_base {
-					break
-				}
-			}
-		}
-		// A VMT may write the path with backslashes, which Source accepts.
-		base_lower := has_base ? strings.to_lower(forward_slashes(base), context.temp_allocator) : ""
-		delete(vmt)
-		if !has_base {
-			missing += 1
-			append(&missing_names, strings.clone(name, context.allocator))
-			continue
-		}
-		texture, texture_ok := asset(data, entries, pak_index, trees, fmt.aprintf("materials/%s.vtf", base_lower, allocator = context.temp_allocator), &diag.Diagnostics{})
-		if !texture_ok {
-			texture, texture_ok = asset(data, entries, pak_index, trees, fmt.aprintf("materials/maps/%s/%s.vtf", map_name, base_lower, allocator = context.temp_allocator), &diag.Diagnostics{})
-		}
-		if !texture_ok {
-			// A per-instance patch borrows the texture of the material it patches.
-			if stripped, changed := strip_variant_suffix(base_lower); changed {
-				texture, texture_ok = asset(data, entries, pak_index, trees, fmt.aprintf("materials/%s.vtf", strings.to_lower(stripped, context.temp_allocator), allocator = context.temp_allocator), &diag.Diagnostics{})
-			}
-		}
-		if !texture_ok {
-			missing += 1
-			append(&missing_names, strings.clone(name, context.allocator))
-			continue
-		}
-		diagnostics := diag.init()
-		dds, format_name, dds_ok := vtf.to_dds(texture, &diagnostics)
-		_ = format_name
-		delete(diagnostics.items)
-		delete(texture)
-		if !dds_ok {
-			missing += 1
-			append(&missing_names, strings.clone(name, context.allocator))
-			continue
-		}
-		path := fmt.aprintf("%s/textures/%s.dds", args.output, name, allocator = context.temp_allocator)
-		// A material name carries a folder ("de_dust/groundsand03"), so the tree has
-		// to be created under textures/ before the file is written.
-		_ = os.make_directory_all(filepath.dir(path))
-		if os.write_entire_file(path, dds) == nil {
-			converted += 1
-		} else {
-			missing += 1
-		}
-		delete(dds)
-	}
-	if len(missing_names) > 0 {
-		names := strings.builder_make(0, 128)
-		for name, i in missing_names {
-			if i == 4 {
-				strings.write_string(&names, " …")
-				break
-			}
-			if i > 0 {
-				strings.write_string(&names, ", ")
-			}
-			strings.write_string(&names, name)
-		}
-		fmt.printfln("textures: %d of %d material(s) converted to DDS, %d without one (%s)",
-			converted, converted + missing, missing, strings.to_string(names))
+	if !have_trees {
 		return
 	}
-	fmt.printfln("textures: %d of %d material(s) converted to DDS", converted, converted + missing)
-	_ = have_trees
+	result, ok := assets.export(data, filepath.stem(args.input), args.output, trees)
+	if !ok {
+		return
+	}
+	fmt.println(assets.report_text(&result))
+	assets.destroy(&result)
 }
 
 slices_clone :: proc(bytes: []u8) -> []u8 {
@@ -1369,40 +1279,13 @@ print_diagnostics :: proc(diagnostics: ^diag.Diagnostics, quiet: bool, report_pa
 	}
 }
 
-// strip_variant_suffix removes the suffix the compiler appends to a per-instance
-// material: "_wvt_patch" for a blend patch and "_<x>_<y>_<z>" for a static prop
-// patch. What is left names the texture the surface actually shows.
-strip_variant_suffix :: proc(name: string) -> (base: string, changed: bool) {
-	if strings.has_suffix(name, "_wvt_patch") {
-		return name[:len(name) - len("_wvt_patch")], true
-	}
-	position := len(name)
-	for _ in 0 ..< 3 {
-		if position <= 0 || name[position - 1] < '0' || name[position - 1] > '9' {
-			return name, false
+// is_nodraw reports whether a material name marks a face the game never draws. The
+// names come from the tool textures every Source map carries.
+is_nodraw :: proc(name: string) -> bool {
+	for marker in ([6]string{"nodraw", "clip", "invisible", "skip", "hint", "areaportal"}) {
+		if strings.contains(name, marker) {
+			return true
 		}
-		for position > 0 && name[position - 1] >= '0' && name[position - 1] <= '9' {
-			position -= 1
-		}
-		if position == 0 || name[position - 1] != '_' {
-			return name, false
-		}
-		position -= 1
 	}
-	if position == 0 || position == len(name) {
-		return name, false
-	}
-	return name[:position], true
-}
-
-// forward_slashes turns the backslashes a VMT may use into path separators.
-forward_slashes :: proc(path: string) -> string {
-	if !strings.contains_rune(path, '\\') {
-		return path
-	}
-	out := make([]u8, len(path), context.temp_allocator)
-	for c, i in transmute([]u8)path {
-		out[i] = c == '\\' ? '/' : c
-	}
-	return string(out)
+	return false
 }

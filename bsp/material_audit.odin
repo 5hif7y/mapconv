@@ -115,8 +115,19 @@ report_materials :: proc(data: []u8, file: ^File, map_name: string, allocator :=
 // basetexture_of returns the value of $basetexture in a VMT, which is the name of
 // the VTF that has to travel with it.
 basetexture_of :: proc(text: string) -> (name: string, ok: bool) {
+	return vmt_value(text, "\"$basetexture\"")
+}
+
+// tooltexture_of returns the texture the engine shows for a material outside the
+// renderer. A Water shader has no albedo at all -- it refracts -- and names only
+// "%tooltexture", so that is the closest thing to a surface a conversion can carry.
+tooltexture_of :: proc(text: string) -> (name: string, ok: bool) {
+	return vmt_value(text, "\"%tooltexture\"")
+}
+
+// vmt_value returns the value that follows a quoted key in a VMT.
+vmt_value :: proc(text: string, key: string) -> (value: string, ok: bool) {
 	lower := strings.to_lower(text, context.temp_allocator)
-	key := "\"$basetexture\""
 	at := strings.index(lower, key)
 	if at < 0 {
 		return "", false

@@ -234,7 +234,11 @@ brush_from_lump :: proc(f: ^File, index: int, dg: ^diag.Diagnostics, path: strin
 			}
 		}
 		uv := ir.default_tex_projection()
-		material := ""
+		// A brush side without a texinfo is not drawn: the compiler writes -1 for the
+		// sides it splits away. It still bounds the brush, so it becomes a polygon
+		// marked nodraw instead of a polygon with no material at all, which is the one
+		// thing a converted brush must not carry.
+		material := "TOOLS/TOOLSNODRAW"
 		if texinfo >= 0 && texinfo < len(f.texinfo) {
 			info := f.texinfo[texinfo]
 			uv = ir.TexProjection {
@@ -248,6 +252,11 @@ brush_from_lump :: proc(f: ^File, index: int, dg: ^diag.Diagnostics, path: strin
 			material, _ = texinfo_of(f, texinfo)
 			if material == "" {
 				material = "TOOLS/TOOLSNODRAW"
+			} else {
+				// The name is the engine's, which upper-cases it; the texture files are
+				// lower-case and the conversion carries both, so the name travels as the
+				// archive spells it.
+				_ = material
 			}
 		}
 		face := ir.make_face(planes[i], uv, material)
