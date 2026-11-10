@@ -259,7 +259,9 @@ lump_reason :: proc(data: []u8, index, offset, length: int) -> string {
 			return "size is not a whole number of leaves"
 		}
 		return ""
-	case LUMP_ENTITIES, LUMP_PLANES, LUMP_TEXDATA, LUMP_VERTEXES, LUMP_NODES, LUMP_TEXINFO, LUMP_FACES, LUMP_EDGES, LUMP_SURFEDGES, LUMP_MODELS, LUMP_LEAFBRUSHES, LUMP_BRUSHES, LUMP_BRUSHSIDES, LUMP_TEXDATA_STRING_DATA, LUMP_TEXDATA_STRING_TABLE:
+	case LUMP_ENTITIES:
+		return entities_reason(data, offset, length)
+	case LUMP_PLANES, LUMP_TEXDATA, LUMP_VERTEXES, LUMP_NODES, LUMP_TEXINFO, LUMP_FACES, LUMP_EDGES, LUMP_SURFEDGES, LUMP_MODELS, LUMP_LEAFBRUSHES, LUMP_BRUSHES, LUMP_BRUSHSIDES, LUMP_TEXDATA_STRING_DATA, LUMP_TEXDATA_STRING_TABLE:
 		return sized_lump_reason(data, index, offset, length)
 	case LUMP_LIGHTING, LUMP_LIGHTING_HDR:
 		return lighting_reason(data, index, offset, length)
@@ -276,10 +278,7 @@ lump_reason :: proc(data: []u8, index, offset, length: int) -> string {
 	case LUMP_DISPVERTS:
 		return disp_verts_reason(data, offset, length)
 	case LUMP_OVERLAYS:
-		if length % 176 != 0 {
-			return "size is not a multiple of 176"
-		}
-		return ""
+		return overlay_reason(data, offset, length)
 	case LUMP_PRIMITIVES:
 		return primitives_reason(data, offset, length)
 	case LUMP_DISPTRIS:
@@ -297,8 +296,14 @@ lump_reason :: proc(data: []u8, index, offset, length: int) -> string {
 		}
 		return ""
 	case LUMP_FACEIDS:
-		if length % 2 != 0 {
-			return "size is not a multiple of 2"
+		// Two bytes per face in face order. The identifiers are arbitrary (they are
+		// not face indices and they repeat), so the count is the check.
+		faces := lump_int(data, LUMP_FACES, 4) / 56
+		if faces <= 0 {
+			return ""
+		}
+		if length != faces * 2 {
+			return "count is not one identifier per face"
 		}
 		return ""
 	case LUMP_VERTNORMALINDICES, LUMP_LEAFS_FACES, LUMP_PRIMINDICES:
@@ -1111,6 +1116,96 @@ leaf_ambient_index_reason :: proc(data: []u8, index, offset, length: int) -> str
 	}
 	if position != samples {
 		return fmt.aprintf("the leaf index ends at sample %d of %d", position, samples)
+	}
+	return ""
+}
+
+// entities_reason reads the entity lump as the text it is: NUL terminated tokens,
+// braces that open and close in order, an even number of tokens inside a block
+// (keys and values alternate) and the last byte a terminator.
+entities_reason :: proc(data: []u8, offset, length: int) -> string {
+	if length <= 0 {
+		return "empty entity lump"
+	}
+	if data[offset + length - 1] != 0 {
+		return "the entity lump does not end with a terminator"
+	}
+	position := 0
+	depth := 0
+	pending := 0 // class name outside a block, key or value inside one
+	for position < length {
+		start := position
+		for position < length && data[offset + position] != 0 {
+			position += 1
+		}
+		if position >= length {
+			return "unterminated token"
+		}
+		token := string(data[offset + start:offset + position])
+		position += 1
+		switch token {
+		case "{":
+			// One token opens a block: the class name.
+			if pending > 1 {
+				return "a block opens after more than one token"
+			}
+			if depth != 0 {
+				return "a block opens inside another block"
+			}
+			depth = 1
+			pending = 0
+		case "}":
+			if depth == 0 {
+				return "a closing brace opens nothing"
+			}
+			if pending % 2 != 0 {
+				return "a key has no value before the block closes"
+			}
+			depth = 0
+			pending = 0
+		case:
+			pending += 1
+		}
+	}
+	if depth != 0 {
+		return "unbalanced braces"
+	}
+	if pending > 1 {
+		return "the entity lump ends inside a pair"
+	}
+	return ""
+}
+
+// overlay_reason reads a 352 byte overlay record: its id is its index, it names at
+// most 64 faces and every one of them exists, and the fade lump holds a pair of
+// floats per overlay when it is there at all.
+overlay_reason :: proc(data: []u8, offset, length: int) -> string {
+	if length % 352 != 0 {
+		return "size is not a multiple of 352"
+	}
+	overlays := length / 352
+	fades := lump_int(data, LUMP_OVERLAY_FADES, 4)
+	if fades > 0 && fades != overlays * 8 {
+		return "the fade lump does not hold eight bytes per overlay"
+	}
+	faces := lump_int(data, LUMP_FACES, 4) / 56
+	for i in 0 ..< overlays {
+		record := offset + i * 352
+		if int(read_i32(data, record)) != i {
+			return "an overlay carries an id that is not its index"
+		}
+		count := int(pak_u16(data, record + 6)) & 0x3fff
+		if count > 64 {
+			return "an overlay names more than 64 faces"
+		}
+		for k in 0 ..< count {
+			if faces > 0 {
+				face := int(read_i32(data, record + 8 + k * 4))
+				if face < 0 || face >= faces {
+					return "an overlay names a face that does not exist"
+				}
+			}
+		}
 	}
 	return ""
 }

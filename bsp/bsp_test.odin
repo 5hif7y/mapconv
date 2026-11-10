@@ -374,7 +374,7 @@ test_pakfile_is_verified_by_crc_and_tiling :: proc(t: ^testing.T) {
 // the first at the start of the lump and the second far enough that the blocks do
 // not touch.
 build_lighting_map :: proc(second_lightofs: i32) -> []u8 {
-	data := make([]u8, 4096)
+	data := make([]u8, 8192)
 	store_i32(data, 0, 20) // version
 	faces_offset := 1024
 	lighting_offset := 2048
@@ -465,4 +465,65 @@ test_leaf_ambient_index_tiles_the_sample_lump :: proc(t: ^testing.T) {
 	defer delete(odd)
 	store_i32(odd, 8 + 10 * 16 + 4, 60)
 	testing.expect_value(t, leaf_ambient_index_reason(odd, 52, 2048, 8), "no leaf lump divisible by its stride to count the index against")
+}
+
+@(test)
+test_entity_text_is_read_as_blocks :: proc(t: ^testing.T) {
+	good := transmute([]u8)string("worldspawn\x00{\x00\"mapname\"\x00\"de_test\"\x00}\x00")
+	testing.expect_value(t, entities_reason(good, 0, len(good)), "")
+
+	// A key with no value before the block closes.
+	lonely := transmute([]u8)string("worldspawn\x00{\x00\"mapname\"\x00}\x00")
+	testing.expect_value(t, entities_reason(lonely, 0, len(lonely)), "a key has no value before the block closes")
+
+	// Braces that never close.
+	open := transmute([]u8)string("worldspawn\x00{\x00\"a\"\x00\"b\"\x00")
+	testing.expect_value(t, entities_reason(open, 0, len(open)), "unbalanced braces")
+
+	// The lump has to end with a terminator.
+	cut := transmute([]u8)string("worldspawn\x00{\x00\"a\"\x00\"b\"\x00}")
+	testing.expect_value(t, entities_reason(cut, 0, len(cut)), "the entity lump does not end with a terminator")
+}
+
+@(test)
+test_face_ids_are_counted_against_the_faces :: proc(t: ^testing.T) {
+	data := build_lighting_map(64) // two faces
+	defer delete(data)
+	face_ids_offset := 3000
+	store_i32(data, 8 + 11 * 16, i32(face_ids_offset))
+	store_i32(data, 8 + 11 * 16 + 4, 4) // two identifiers, two faces
+	testing.expect_value(t, lump_reason(data, 11, face_ids_offset, 4), "")
+
+	// One identifier more than the map has faces is a count that does not hold.
+	testing.expect_value(t, lump_reason(data, 11, face_ids_offset, 6), "count is not one identifier per face")
+}
+
+@(test)
+test_overlay_records_name_existing_faces :: proc(t: ^testing.T) {
+	data := build_lighting_map(64) // two faces
+	defer delete(data)
+	overlay_offset := 5120
+	store_i32(data, 8 + 45 * 16, i32(overlay_offset))
+	store_i32(data, 8 + 45 * 16 + 4, 352)
+	record := overlay_offset
+	store_i32(data, record, 0) // id 0, its own index
+	store_u16_bytes(data, record + 6, 2) // two faces
+	store_i32(data, record + 8, 0)
+	store_i32(data, record + 12, 1)
+	testing.expect_value(t, lump_reason(data, 45, overlay_offset, 352), "")
+
+	// A face index past the face lump belongs to no surface.
+	store_i32(data, record + 12, 5)
+	testing.expect_value(t, lump_reason(data, 45, overlay_offset, 352), "an overlay names a face that does not exist")
+
+	// The id has to be the record's own index.
+	store_i32(data, record + 12, 1)
+	store_i32(data, record, 7)
+	testing.expect_value(t, lump_reason(data, 45, overlay_offset, 352), "an overlay carries an id that is not its index")
+
+	// A fade lump that holds anything but eight bytes per overlay contradicts it.
+	store_i32(data, record, 0)
+	store_i32(data, 8 + 60 * 16, 6144)
+	store_i32(data, 8 + 60 * 16 + 4, 16) // two overlays' worth
+	testing.expect_value(t, lump_reason(data, 45, overlay_offset, 352), "the fade lump does not hold eight bytes per overlay")
 }
