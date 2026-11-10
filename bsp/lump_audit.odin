@@ -245,6 +245,12 @@ lump_reason :: proc(data: []u8, index, offset, length: int) -> string {
 		return vectors_reason(data, offset, length)
 	case LUMP_LEAF_WATER_DATA:
 		return leaf_water_reason(data, offset, length)
+	case LUMP_LEAF_MIN_DIST_TO_WATER:
+		return leaf_water_distance_reason(data, offset, length)
+	case LUMP_LIGHTMAP_PAGES, LUMP_LIGHTMAP_PAGE_INFOS:
+		return leaf_index_lump_reason(data, index, offset, length)
+	case LUMP_OVERLAY_FADES:
+		return overlay_fade_reason(data, offset, length)
 	case LUMP_MAP_FLAGS:
 		if length < 4 {
 			return "shorter than the map flags word"
@@ -588,6 +594,75 @@ vectors_reason :: proc(data: []u8, offset, length: int) -> string {
 			value := read_f32(data, offset + i * 12 + k * 4)
 			if !(value == value) || value > 1e30 || value < -1e30 {
 				return "non-finite vector component"
+			}
+		}
+	}
+	return ""
+}
+
+// leaf_stride returns the size of one dleaf_t for this map version: Source 2006
+// maps (version 19) store a 56 byte leaf, later maps 32. Counting leaves with the
+// wrong stride is what made the water distance lump look like it had a prefix.
+leaf_stride :: proc(data: []u8) -> int {
+	if read_i32(data, 4) < 20 {
+		return 56
+	}
+	return 32
+}
+
+// leaf_count is the number of leaves the leaf lump holds, or zero when the lump
+// is absent or its length does not divide by the version's stride.
+leaf_count :: proc(data: []u8) -> int {
+	stride := leaf_stride(data)
+	length := lump_int(data, LUMP_LEAFS, 4)
+	if stride <= 0 || length <= 0 || length % stride != 0 {
+		return 0
+	}
+	return length / stride
+}
+
+// leaf_water_distance_reason validates the per-leaf water distance array: one
+// 16 bit distance per leaf, 0xFFFF for a leaf with no water nearby. The count is
+// checked against the leaf lump, so the reader cannot pass by consuming a size.
+leaf_water_distance_reason :: proc(data: []u8, offset, length: int) -> string {
+	leaves := leaf_count(data)
+	if leaves == 0 {
+		return "no divisible leaf lump to check the distance array against"
+	}
+	if length != leaves * 2 {
+		return "size is not two bytes per leaf"
+	}
+	return ""
+}
+
+// leaf_index_lump_reason validates the per-leaf lightmap page arrays: four bytes
+// per leaf, in leaf order.
+leaf_index_lump_reason :: proc(data: []u8, index, offset, length: int) -> string {
+	leaves := leaf_count(data)
+	if leaves == 0 {
+		return "no divisible leaf lump to check the page array against"
+	}
+	if length != leaves * 4 {
+		return "size is not four bytes per leaf"
+	}
+	return ""
+}
+
+// overlay_fade_reason validates the per-overlay fade pair: eight bytes (two
+// floats) per overlay, counted against the overlay lump (352 bytes per record).
+overlay_fade_reason :: proc(data: []u8, offset, length: int) -> string {
+	overlays := lump_int(data, LUMP_OVERLAYS, 4) / 352
+	if overlays == 0 {
+		return "no overlay lump to check the fade array against"
+	}
+	if length != overlays * 8 {
+		return "size is not eight bytes per overlay"
+	}
+	for i in 0 ..< length / 8 {
+		for k in 0 ..< 2 {
+			value := read_f32(data, offset + i * 8 + k * 4)
+			if !(value == value) || value > 1e30 || value < -1e30 {
+				return "non-finite fade value"
 			}
 		}
 	}
