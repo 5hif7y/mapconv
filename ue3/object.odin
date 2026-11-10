@@ -78,6 +78,12 @@ Object_Head :: struct {
 // imported script packages, so this uses the engine's naming convention.
 is_component_class :: proc(pkg: ^Package, e: Export) -> bool {
 	class := export_class_name(pkg, e)
+	// AnimNotify_AttachComponent ends in "Component" but it is a notify, not a
+	// component: its payload is a plain tag stream with no prelude, which is what
+	// the objects of CrimeCraftAnimSets carry.
+	if strings.has_prefix(class, "AnimNotify_") {
+		return false
+	}
 	return strings.has_suffix(class, "Component")
 }
 
