@@ -137,6 +137,20 @@ read_object_head :: proc(
 	if !diag.has_errors(&first_d) {
 		return first, first_d
 	}
+	// The components of an archetype (the subobjects of a Default__ object) are
+	// saved with a sixteen byte prelude before their tagged defaults: a zero word,
+	// the subobject name and its net index. The name has to be the one the export
+	// table gives to this export, which is a real check, so this reading is tried
+	// before the unguarded component prelude: a payload that carries both would
+	// otherwise be credited only as far as the first stray None.
+	if export_index >= 0 {
+		sub, sub_d := read_object_head_subobject(pkg, e, allocator, export_index)
+		if !diag.has_errors(&sub_d) {
+			delete(first_d.items)
+			return sub, sub_d
+		}
+		delete(sub_d.items)
+	}
 	// Some non-component subobjects (UDistributionFloatUniform in the script
 	// packages) are serialized with the component prelude: a template owner
 	// reference before the NetIndex. Retry with that prelude instead of
@@ -162,14 +176,6 @@ read_object_head :: proc(
 	// word, the subobject name and the export's own linker index. That index is
 	// the check: the prelude cannot be mistaken for anything else because the
 	// word has to equal the export it belongs to.
-	if export_index >= 0 {
-		sub, sub_d := read_object_head_subobject(pkg, e, allocator, export_index)
-		if !diag.has_errors(&sub_d) {
-			delete(first_d.items)
-			return sub, sub_d
-		}
-		delete(sub_d.items)
-	}
 	return first, first_d
 }
 
@@ -262,6 +268,14 @@ read_tag_stream :: proc(
 		if is_none_name(pkg, name) {
 			break
 		}
+		// A property name has to exist. Without this check a stream that is not a
+		// tag stream can still wander: an index outside the table reads as a text,
+		// the declared size reads as zero and the walk stops at the first None it
+		// meets, crediting the object only as far as that point.
+		if name.index < 0 || int(name.index) >= len(pkg.names) {
+			diag.err(d, "ue3.bad-tag-name", fmt.aprintf("property name %d is outside the name table", name.index))
+			return nil
+		}
 		type := read_name_ref(r)
 		size := read_i32(r)
 		array_index := read_i32(r)
@@ -274,6 +288,10 @@ read_tag_stream :: proc(
 			type         = type,
 			size         = size,
 			array_index  = array_index,
+		}
+		if type.index < 0 || int(type.index) >= len(pkg.names) {
+			diag.err(d, "ue3.bad-tag-type", fmt.aprintf("property type %d is outside the name table", type.index))
+			return nil
 		}
 		type_text := name_text(pkg, type)
 		if type_text == "StructProperty" {
