@@ -205,6 +205,14 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 				detail = style_d.items[0].message
 			}
 			delete(style_d.items)
+		case "SeqAct_Interp":
+			interp_d := read_seq_act_interp(pkg, index, allocator)
+			if !diag.has_errors(&interp_d) {
+				interpreted = i64(e.serial_size)
+			} else if len(interp_d.items) > 0 && detail == "" {
+				detail = interp_d.items[0].message
+			}
+			delete(interp_d.items)
 		case "GuidCache":
 			_, cache_d := read_guid_cache(pkg, index, allocator)
 			if !diag.has_errors(&cache_d) {
