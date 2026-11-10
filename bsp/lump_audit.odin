@@ -104,6 +104,14 @@ Lump_Audit :: struct {
 	pakfile_entries:  int,
 	pakfile_payload:  i64,
 	pakfile_verified: int,
+	// The lightmap lumps hold more than the faces that point into them: the blocks
+	// of the faces cover about a third of the two lumps together. These three
+	// fields report that, so the gap is visible on every run and not only in the
+	// notes: the planes between blocks are a measured structure this reader does
+	// not attribute to a face.
+	lightmap_blocks:       int,
+	lightmap_attributed:   i64,
+	lightmap_total:        i64,
 }
 
 // HEADER_BYTES is the ident, the version, the 64 lump descriptors and the map
@@ -132,6 +140,12 @@ audit_lumps :: proc(data: []u8) -> Lump_Audit {
 			index  = i,
 			name   = LUMP_NAMES[i],
 			length = length,
+		}
+		if i == LUMP_LIGHTING || i == LUMP_LIGHTING_HDR {
+			blocks, attributed := lightmap_coverage(data, i)
+			result.lightmap_blocks += blocks
+			result.lightmap_attributed += attributed
+			result.lightmap_total += i64(length)
 		}
 		if i == LUMP_PAKFILE {
 			// The archive is checked as content, not as a span: the records have to
@@ -225,6 +239,11 @@ audit_lumps_text :: proc(a: ^Lump_Audit) -> string {
 	}
 	if a.padding > 0 {
 		fmt.sbprintf(&b, "alignment:       %12d (zero bytes between lumps)\n", a.padding)
+	}
+	if a.lightmap_total > 0 {
+		fmt.sbprintf(&b, "lightmaps:       %12d blocks, %d of %d bytes attributed to a face (%.1f%%)\n",
+			a.lightmap_blocks, a.lightmap_attributed, a.lightmap_total,
+			percent(a.lightmap_attributed, a.lightmap_total))
 	}
 	if a.pakfile_entries > 0 {
 		fmt.sbprintf(&b, "pakfile:         %12d entries, %d bytes of payload, %d CRC32 matched\n",
@@ -357,6 +376,34 @@ lump_reason :: proc(data: []u8, index, offset, length: int) -> string {
 		return dispinfo_reason(data, offset, length)
 	}
 	return "no reader"
+}
+
+// lightmap_coverage counts the face blocks of one lightmap lump and the bytes they
+// claim, which is how the audit reports how much of the lump the faces explain.
+lightmap_coverage :: proc(data: []u8, index: int) -> (blocks: int, attributed: i64) {
+	faces_lump := LUMP_FACES
+	if index == LUMP_LIGHTING_HDR {
+		faces_lump = LUMP_FACES_HDR
+	}
+	faces_offset := lump_int(data, faces_lump, 0)
+	faces_length := lump_int(data, faces_lump, 4)
+	if faces_length <= 0 || faces_offset <= 0 {
+		return
+	}
+	for i in 0 ..< faces_length / 56 {
+		face := faces_offset + i * 56
+		if int(read_i32(data, face + 20)) < 0 {
+			continue
+		}
+		size_x := int(read_i32(data, face + 36))
+		size_y := int(read_i32(data, face + 40))
+		if size_x < 0 || size_y < 0 {
+			continue
+		}
+		blocks += 1
+		attributed += i64(size_x + 1) * i64(size_y + 1) * 4
+	}
+	return
 }
 
 // lighting_reason checks the lightmap sample array against the faces that point
