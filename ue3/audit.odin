@@ -100,6 +100,26 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 			delete(class_d.items)
 		}
 
+		// A component subobject may end with up to sixteen zero bytes after its tag
+		// stream. The engine source does not explain them (UComponent::PreSerialize
+		// writes its prelude before the tag stream, not after) and they carry no
+		// length, so this is an envelope: the bytes are credited only because they
+		// are zero and end the payload, and any other tail is reported.
+		if !head_failed && head.has_subobject && !strings.has_prefix(class, "UIComp_") {
+			if tail := head.end_offset - head.body_offset; tail > 0 && tail <= 16 {
+				zero := true
+				for i in head.body_offset ..< head.end_offset {
+					if pkg.data[i] != 0 {
+						zero = false
+						break
+					}
+				}
+				if zero {
+					interpreted = i64(e.serial_size)
+				}
+			}
+		}
+
 		// UI component templates serialize the component prelude (template owner
 		// class plus net index) even though their class name does not end in
 		// "Component". The prelude and the tag stream are credited byte by byte.
