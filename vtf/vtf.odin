@@ -97,12 +97,20 @@ to_dds :: proc(data: []u8, d: ^diag.Diagnostics) -> (out: []u8, format_name: str
 		diag.err(d, "vtf.bad-header-size", "VTF header size is outside the file")
 		return
 	}
-	offset := h.header_size
+	// A VTF stores the mip chain smallest first, so the largest mip is the last
+	// one: everything the smaller mips take comes before it. Reading the other way
+	// round worked only for single-mip files and reported the rest as truncated.
+	smaller := 0
 	w, hh := h.width, h.height
 	for mip := 1; mip < h.mip_count; mip += 1 {
-		offset += mip_size(h.format, w, hh)
 		w = max(1, w/2); hh = max(1, hh/2)
+		size := mip_size(h.format, w, hh)
+		if size == 0 {
+			break
+		}
+		smaller += size
 	}
+	offset := h.header_size + smaller
 	if offset + top > len(data) {
 		diag.err(d, "vtf.truncated", "VTF mip data is shorter than declared")
 		return

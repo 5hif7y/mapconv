@@ -3,6 +3,31 @@ package vtf
 import "core:testing"
 import "../diag"
 
+// A VTF 7.2 whose mip chain has more than one level must still give back the
+// largest mip: the file stores the smallest first, so a reader that walks the
+// chain from the top lands past the data and reports the file as truncated. That
+// is what a whole package of extracted textures hit.
+@(test)
+test_to_dds_reads_the_largest_mip_of_a_chain :: proc(t: ^testing.T) {
+	mip0 := [32]u8{}
+	mip1 := [8]u8{}
+	for i in 0..<32 { mip0[i] = u8(0xA0 + i) }
+	for i in 0..<8 { mip1[i] = u8(0x10 + i) }
+	mips := [][]u8{mip0[:], mip1[:]} // largest first, the order the encoder takes
+	encoded, ok := encode(8, 8, IMAGE_FORMAT_DXT1, mips)
+	testing.expect(t, ok, "encode failed")
+	d := diag.init()
+	defer delete(d.items)
+	dds, _, converted := to_dds(encoded, &d)
+	testing.expect(t, converted, "to_dds rejected a two mip file")
+	testing.expect_value(t, len(dds), 128 + 32)
+	for i in 0..<32 {
+		testing.expect_value(t, dds[128 + i], mip0[i])
+	}
+	delete(encoded)
+	delete(dds)
+}
+
 // A 4x4 DXT1 VTF 7.2 with one mip: header (80 bytes) plus 8 bytes of blocks.
 build_vtf :: proc() -> [dynamic]u8 {
 	d: [dynamic]u8
