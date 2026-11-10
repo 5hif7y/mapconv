@@ -379,9 +379,12 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 			}
 			delete(pcd_d.items)
 		case "ShaderCache":
-			_, scache_d := read_shader_cache(pkg, index, allocator)
+			sc_res, scache_d := read_shader_cache(pkg, index, allocator)
+			fmt.eprintln("DBG case shadercache", len(scache_d.items), diag.has_errors(&scache_d), sc_res.shaders, sc_res.payload_bytes, e.serial_size)
 			if !diag.has_errors(&scache_d) {
 				interpreted = i64(e.serial_size)
+			} else if len(scache_d.items) > 0 && detail == "" {
+				detail = scache_d.items[0].message
 			}
 			delete(scache_d.items)
 		case "PhysicsAssetInstance":

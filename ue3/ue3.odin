@@ -829,3 +829,12 @@ compression_flags_text :: proc(flags: u32) -> string {
 	}
 	return strings.clone(strings.to_string(b))
 }
+
+// read_name_ref_at reads an FName that was skipped over.
+read_name_ref_at :: proc(data: []u8, at: int) -> Name_Ref {
+	if at < 0 || at + 8 > len(data) {
+		return Name_Ref{}
+	}
+	return Name_Ref{index = i32(u32(data[at]) | u32(data[at+1]) << 8 | u32(data[at+2]) << 16 | u32(data[at+3]) << 24),
+		number = i32(u32(data[at+4]) | u32(data[at+5]) << 8 | u32(data[at+6]) << 16 | u32(data[at+7]) << 24)}
+}
