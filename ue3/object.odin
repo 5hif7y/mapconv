@@ -688,15 +688,23 @@ read_prefab_instance :: proc(
 		diag.err(&d, "ue3.bad-prefab", fmt.aprintf("a prefab of %d subobjects cannot hold the tail", count))
 		return
 	}
+	// Both fields are references: the pairs of industrial01 look like a name index and
+	// an object, but the ones of industrial02_SFG carry 1651, which is past that
+	// package's name table and inside its export table. Zero is the null reference and
+	// appears in the middle of the map.
 	for _ in 0 ..< count {
-		name := read_i32(&r)
-		object := read_i32(&r)
-		if r.failed || name < 0 || int(name) >= len(pkg.names) {
-			diag.err(&d, "ue3.bad-prefab", fmt.aprintf("name %d is outside the name table", name))
+		first := read_i32(&r)
+		second := read_i32(&r)
+		if r.failed {
+			diag.err(&d, "ue3.truncated", r.message)
 			return
 		}
-		if !valid_object_reference(pkg, object) {
-			diag.err(&d, "ue3.bad-prefab", fmt.aprintf("%d is not an object reference", object))
+		if first != 0 && !valid_object_reference(pkg, first) {
+			diag.err(&d, "ue3.bad-prefab", fmt.aprintf("%d is not an object reference", first))
+			return
+		}
+		if second != 0 && !valid_object_reference(pkg, second) {
+			diag.err(&d, "ue3.bad-prefab", fmt.aprintf("%d is not an object reference", second))
 			return
 		}
 	}
