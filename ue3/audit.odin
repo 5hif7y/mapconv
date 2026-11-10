@@ -172,6 +172,12 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 				interpreted = i64(e.serial_size)
 			}
 			delete(struct_d.items)
+		case "World":
+			_, world_d := read_world(pkg, index, allocator)
+			if !diag.has_errors(&world_d) {
+				interpreted = i64(e.serial_size)
+			}
+			delete(world_d.items)
 		case "Font":
 			_, font_d := read_font(pkg, index, allocator)
 			if !diag.has_errors(&font_d) {
