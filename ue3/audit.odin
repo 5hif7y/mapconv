@@ -176,6 +176,15 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 				interpreted = i64(e.serial_size)
 			}
 			delete(struct_d.items)
+		case "TextureCube":
+			cube_offset, cube_d := read_texture_cube(pkg, index, allocator)
+
+			if !diag.has_errors(&cube_d) && cube_offset > 0 {
+				interpreted = i64(e.serial_size)
+			} else if len(cube_d.items) > 0 {
+				detail = cube_d.items[0].message
+			}
+			delete(cube_d.items)
 		case "PointLightComponent", "SpotLightComponent", "DirectionalLightComponent", "SkyLightComponent", "BeastAreaLightComponent", "LightComponent":
 			_, light_d := read_light_component_tail(pkg, index, allocator)
 			if !diag.has_errors(&light_d) {

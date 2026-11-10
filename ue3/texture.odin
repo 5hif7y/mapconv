@@ -43,6 +43,10 @@ Texture :: struct {
 	// Cache name, when the mips are streamed.
 	cache_name:   string,
 	streamed:     int,
+	// cube_tail is set when the sixteen byte texture cube record at the end of a
+	// cube was consumed: twelve reserved bytes and the streamed mip offset.
+	cube_tail:    bool,
+	cube_offset:  i32,
 }
 
 // read_bulk_header reads the common FUntypedBulkData prefix.
@@ -246,6 +250,27 @@ read_texture :: proc(
 		}
 		texture.mips[i] = mip
 	}
+	// A texture cube ends with a sixteen byte record after the mip chain: twelve
+	// reserved bytes and the offset of its mips when they live outside the file.
+	if strings.has_suffix(export_class_name(pkg, e), "Cube") {
+		left := head.end_offset - r.pos
+		if left == 16 {
+			zeros := true
+			for i in 0 ..< 12 {
+				if pkg.data[r.pos + i] != 0 {
+					zeros = false
+				}
+			}
+			if zeros {
+				r.pos += 12
+				offset := read_i32(&r)
+				if !r.failed && offset > 0 {
+					texture.cube_tail = true
+					texture.cube_offset = offset
+				}
+			}
+		}
+	}
 	if texture.streamed > 0 {
 		diag.info(
 			&d,
@@ -261,6 +286,54 @@ read_texture :: proc(
 			name_text(pkg, e.object_name),
 		)
 	}
+	return
+}
+
+// read_texture_cube covers the texture cube body. Unlike a texture 2D it carries
+// no source art bytes and no inline mip chain: sixteen bytes that are the
+// FUntypedBulkData header of the stripped source art, with the first three words
+// zero and the recorded file offset equal to the export's own offset, which is
+// where the bulk data lived before cooking removed it.
+read_texture_cube :: proc(
+	pkg: ^Package,
+	export_index: int,
+	allocator := context.allocator,
+) -> (streamed_offset: i32, d: diag.Diagnostics) {
+	d = diag.init()
+	if export_index < 0 || export_index >= len(pkg.exports) {
+		diag.err(&d, "ue3.bad-export", fmt.aprintf("export index %d out of range", export_index))
+		return
+	}
+	e := pkg.exports[export_index]
+	head, head_d := read_object_head(pkg, e, allocator)
+	if diag.has_errors(&head_d) {
+		d = head_d
+		return
+	}
+	defer delete(head_d.items)
+	if head.end_offset - head.body_offset != 16 {
+		diag.err(&d, "ue3.bad-texture", fmt.aprintf("cube body is %d bytes, expected 16", head.end_offset - head.body_offset))
+		return
+	}
+	r := Reader{data = pkg.data, pos = head.body_offset, limit = head.end_offset}
+	for i in 0 ..< 12 {
+		if read_u8(&r) != 0 {
+			diag.err(&d, "ue3.bad-texture", fmt.aprintf("cube record byte %d is not reserved", i))
+			return
+		}
+	}
+	// The recorded offset must point inside the package, after the export header:
+	// that is where the stripped source art was written before cooking.
+	offset := read_i32(&r)
+	if r.failed || offset <= e.serial_offset || i64(offset) >= i64(len(pkg.data)) {
+		diag.err(&d, "ue3.bad-texture", fmt.aprintf("cube record offset %d is outside the export range [%d, %d)", offset, e.serial_offset, len(pkg.data)))
+		return
+	}
+	if r.pos != head.end_offset {
+		diag.err(&d, "ue3.bad-texture", "cube record did not end with the export")
+		return
+	}
+	streamed_offset = offset
 	return
 }
 
