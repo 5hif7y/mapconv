@@ -97,6 +97,12 @@ Lump_Audit :: struct {
 	// padding counts the bytes no lump claims that are zero: every lump starts on
 	// a four byte boundary, so the writer leaves up to three bytes between them.
 	padding:       i64,
+	// The pakfile lump is a ZIP archive, so it is not bounded but decoded: every
+	// entry is inflated where needed and its CRC32 checked against the directory.
+	// These three fields report how much content that covered.
+	pakfile_entries:  int,
+	pakfile_payload:  i64,
+	pakfile_verified: int,
 }
 
 // HEADER_BYTES is the ident, the version, the 64 lump descriptors and the map
@@ -126,7 +132,20 @@ audit_lumps :: proc(data: []u8) -> Lump_Audit {
 			name   = LUMP_NAMES[i],
 			length = length,
 		}
-		row.reason = lump_reason(data, i, offset, length)
+		if i == LUMP_PAKFILE {
+			// The archive is checked as content, not as a span: the records have to
+			// tile the lump and every payload has to match the CRC32 the directory
+			// records for it.
+			report := verify_pakfile(data, offset, length)
+			row.reason = report.reason
+			if report.reason == "" {
+				result.pakfile_entries = report.entries
+				result.pakfile_payload = report.payload
+				result.pakfile_verified = report.verified
+			}
+		} else {
+			row.reason = lump_reason(data, i, offset, length)
+		}
 		row.interpreted = row.reason == ""
 		if row.interpreted {
 			result.interpreted += i64(length)
@@ -206,6 +225,10 @@ audit_lumps_text :: proc(a: ^Lump_Audit) -> string {
 	if a.padding > 0 {
 		fmt.sbprintf(&b, "alignment:       %12d (zero bytes between lumps)\n", a.padding)
 	}
+	if a.pakfile_entries > 0 {
+		fmt.sbprintf(&b, "pakfile:         %12d entries, %d bytes of payload, %d CRC32 matched\n",
+			a.pakfile_entries, a.pakfile_payload, a.pakfile_verified)
+	}
 	fmt.sbprintf(&b, "credited:        %12d (%.1f%%)\n", credited, percent(credited, a.file_bytes))
 	fmt.sbprintf(&b, "uninterpreted:   %12d\n", a.file_bytes - credited)
 	for row in a.rows {
@@ -237,27 +260,9 @@ lump_reason :: proc(data: []u8, index, offset, length: int) -> string {
 	case LUMP_PHYSCOLLIDE, LUMP_PHYSCOLLIDESURFACE:
 		return phys_collide_reason(data, offset, length)
 	case LUMP_PAKFILE:
-		// An archive with no entries still carries an end record, which is
-		// interpreted; anything else must have every payload inside the lump.
-		if length >= 22 && data[offset] == 'P' && data[offset + 1] == 'K' && data[offset + 2] == 5 && data[offset + 3] == 6 {
-			return ""
-		}
-		entries, d := read_pakfile(data, offset, length)
-		defer delete(entries)
-		defer delete(d.items)
-		if len(entries) == 0 {
-			return "no zip directory"
-		}
-		end := offset + length
-		for entry in entries {
-			if entry.method != 0 && entry.method != 8 {
-				return "unsupported compression method"
-			}
-			if entry.data_offset < offset || entry.data_offset + entry.comp_size > end {
-				return "entry payload past the lump"
-			}
-		}
-		return ""
+		// audit_lumps checks the archive with verify_pakfile, which decodes every
+		// entry; reaching this arm means the lump arrived from somewhere else.
+		return verify_pakfile(data, offset, length).reason
 	case LUMP_ORIGFACES, LUMP_FACES_HDR:
 		return faces_reason(data, offset, length)
 	case LUMP_DISPVERTS:

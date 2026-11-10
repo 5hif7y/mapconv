@@ -1,5 +1,6 @@
 package bsp
 
+import "core:hash"
 import "core:testing"
 import "../diag"
 import "../geom"
@@ -272,4 +273,99 @@ has_property :: proc(props: []ir.Property, key: string) -> bool {
 		}
 	}
 	return false
+}
+
+// build_stored_zip lays out the archive Source writes into lump 40: local records
+// that tile the region, a central directory that repeats them and an end record.
+// Every entry is stored, which is what the corpus shows in all 180,705 of them.
+zip_u16 :: proc(d: ^[dynamic]u8, v: u16) { append(d, u8(v & 0xff), u8(v >> 8)) }
+zip_u32 :: proc(d: ^[dynamic]u8, v: u32) {
+	append(d, u8(v & 0xff), u8((v >> 8) & 0xff), u8((v >> 16) & 0xff), u8((v >> 24) & 0xff))
+}
+
+build_stored_zip :: proc(names: []string, bodies: [][]u8) -> []u8 {
+	data: [dynamic]u8
+	records := make([]int, len(names), context.allocator)
+	defer delete(records)
+	for name, i in names {
+		records[i] = len(data)
+		crc := hash.crc32(bodies[i])
+		append(&data, u8('P'), u8('K'), 3, 4)
+		zip_u16(&data, 20) // version needed
+		zip_u16(&data, 0) // flags
+		zip_u16(&data, 0) // method: stored
+		zip_u16(&data, 0) // time
+		zip_u16(&data, 0) // date
+		zip_u32(&data, crc)
+		zip_u32(&data, u32(len(bodies[i])))
+		zip_u32(&data, u32(len(bodies[i])))
+		zip_u16(&data, u16(len(name)))
+		zip_u16(&data, 0) // extra
+		append(&data, ..transmute([]u8)name)
+		append(&data, ..bodies[i])
+	}
+	directory := len(data)
+	for name, i in names {
+		crc := hash.crc32(bodies[i])
+		append(&data, u8('P'), u8('K'), 1, 2)
+		zip_u16(&data, 20) // made by
+		zip_u16(&data, 20) // needed
+		zip_u16(&data, 0) // flags
+		zip_u16(&data, 0) // method
+		zip_u16(&data, 0) // time
+		zip_u16(&data, 0) // date
+		zip_u32(&data, crc)
+		zip_u32(&data, u32(len(bodies[i])))
+		zip_u32(&data, u32(len(bodies[i])))
+		zip_u16(&data, u16(len(name)))
+		zip_u16(&data, 0) // extra
+		zip_u16(&data, 0) // comment
+		zip_u16(&data, 0) // disk
+		zip_u16(&data, 0) // internal attributes
+		zip_u32(&data, 0) // external attributes
+		zip_u32(&data, u32(records[i]))
+		append(&data, ..transmute([]u8)name)
+	}
+	dir_size := len(data) - directory
+	append(&data, u8('P'), u8('K'), 5, 6)
+	zip_u16(&data, 0) // disk
+	zip_u16(&data, 0) // directory disk
+	zip_u16(&data, u16(len(names)))
+	zip_u16(&data, u16(len(names)))
+	zip_u32(&data, u32(dir_size))
+	zip_u32(&data, u32(directory))
+	zip_u16(&data, 0) // comment length
+	return data[:]
+}
+
+@(test)
+test_pakfile_is_verified_by_crc_and_tiling :: proc(t: ^testing.T) {
+	bodies := [][]u8{transmute([]u8)string("materials/dev/dev_test.vmt"), transmute([]u8)string("hello")}
+	names := []string{"materials/dev/dev_test.vmt", "readme.txt"}
+	data := build_stored_zip(names, bodies)
+	defer delete(data)
+	report := verify_pakfile(data, 0, len(data))
+	testing.expectf(t, report.reason == "", "valid archive rejected: %s", report.reason)
+	testing.expect_value(t, report.entries, 2)
+	testing.expect_value(t, report.verified, 2)
+	testing.expect_value(t, report.stored, 2)
+	testing.expect_value(t, report.payload, i64(len(bodies[0]) + len(bodies[1])))
+
+	// One flipped payload byte has to be caught: the CRC is what turns a bounded
+	// region into decoded content.
+	mutated := make([]u8, len(data))
+	defer delete(mutated)
+	copy(mutated, data)
+	mutated[40] ~= 0x01
+	testing.expect(t, verify_pakfile(mutated, 0, len(mutated)).reason != "", "a wrong CRC has to be reported")
+
+	// So has a truncated lump, which cannot even hold its directory.
+	testing.expect(t, verify_pakfile(data, 0, len(data) - 3).reason != "", "a truncated archive has to be reported")
+
+	// And a directory whose count does not match what it holds.
+	broken := make([]u8, len(data))
+	defer delete(broken)
+	copy(broken, data)
+	broken[len(data) - 12] = 9
+	testing.expect(t, verify_pakfile(broken, 0, len(broken)).reason != "", "a wrong entry count has to be reported")
 }
