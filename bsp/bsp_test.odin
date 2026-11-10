@@ -527,3 +527,63 @@ test_overlay_records_name_existing_faces :: proc(t: ^testing.T) {
 	store_i32(data, 8 + 60 * 16 + 4, 16) // two overlays' worth
 	testing.expect_value(t, lump_reason(data, 45, overlay_offset, 352), "the fade lump does not hold eight bytes per overlay")
 }
+
+set_lump :: proc(data: []u8, index, offset, length: int) {
+	store_i32(data, 8 + index * 16, i32(offset))
+	store_i32(data, 8 + index * 16 + 4, i32(length))
+}
+
+// A map with one displacement of power 2: 25 vertices, 32 triangles, and one face
+// of 2x2 luxels carrying it.
+build_disp_map :: proc(power: i32, vertex_start: int, tri_start: int) -> []u8 {
+	data := make([]u8, 16384)
+	store_i32(data, 4, 20)
+	faces_offset := 1024
+	info_offset := 2048
+	set_lump(data, 7, faces_offset, 56)
+	set_lump(data, 26, info_offset, 176)
+	set_lump(data, 33, 4096, 25 * 20)
+	set_lump(data, 48, 6144, 32 * 2)
+	set_lump(data, 30, 7168, 3 * 12) // three normals
+	// The face carries a displacement and a 2x2 luxel lightmap.
+	store_u16_bytes(data, faces_offset + 12, 0) // dispinfo index 0
+	store_u16_bytes(data, faces_offset + 8, 3) // three vertices, so three normal indices
+	store_i32(data, faces_offset + 36, 1)
+	store_i32(data, faces_offset + 40, 1)
+	// The displacement record.
+	store_i32(data, info_offset + 12, i32(vertex_start))
+	store_i32(data, info_offset + 16, i32(tri_start))
+	store_i32(data, info_offset + 20, power)
+	return data
+}
+
+@(test)
+test_displacement_runs_add_up_to_their_lumps :: proc(t: ^testing.T) {
+	data := build_disp_map(2, 0, 0)
+	defer delete(data)
+	testing.expect_value(t, dispinfo_reason(data, 2048, 176), "")
+	testing.expect_value(t, disp_tri_reason(data, 6144, 64), "")
+	testing.expect_value(t, disp_lightmap_alpha_reason(data, 8192, 4), "")
+	testing.expect_value(t, vert_normal_index_reason(data, 9216, 6), "")
+
+	// A triangle lump that does not hold two bytes per triangle the records name.
+	testing.expect_value(t, disp_tri_reason(data, 6144, 66), "triangle count does not match the displacement infos")
+
+	// A vertex run that does not continue the previous one.
+	moved := build_disp_map(2, 7, 0)
+	defer delete(moved)
+	testing.expect_value(t, dispinfo_reason(moved, 2048, 176), "a displacement vertex run does not continue the previous one")
+
+	// A power outside the range the corpus shows.
+	bad_power := build_disp_map(9, 0, 0)
+	defer delete(bad_power)
+	testing.expect_value(t, dispinfo_reason(bad_power, 2048, 176), "displacement power outside 2..4")
+
+	// One byte per luxel: the face says 2x2, so four bytes and not five.
+	testing.expect_value(t, disp_lightmap_alpha_reason(data, 8192, 5), "count is not one byte per displacement lightmap luxel")
+
+	// Three vertices means three normal indices, and each has to name a normal.
+	testing.expect_value(t, vert_normal_index_reason(data, 9216, 8), "count is not one index per vertex a face uses")
+	store_u16_bytes(data, 9216, 3) // only three normals exist
+	testing.expect_value(t, vert_normal_index_reason(data, 9216, 6), "a normal index is past the normal lump")
+}

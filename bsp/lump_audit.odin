@@ -282,10 +282,7 @@ lump_reason :: proc(data: []u8, index, offset, length: int) -> string {
 	case LUMP_PRIMITIVES:
 		return primitives_reason(data, offset, length)
 	case LUMP_DISPTRIS:
-		if length % 16 != 0 {
-			return "size is not a multiple of 16"
-		}
-		return ""
+		return disp_tri_reason(data, offset, length)
 	case LUMP_GAMELUMP:
 		return game_lump_reason(data, offset, length)
 	case LUMP_VISIBILITY:
@@ -306,7 +303,9 @@ lump_reason :: proc(data: []u8, index, offset, length: int) -> string {
 			return "count is not one identifier per face"
 		}
 		return ""
-	case LUMP_VERTNORMALINDICES, LUMP_LEAFS_FACES, LUMP_PRIMINDICES:
+	case LUMP_VERTNORMALINDICES:
+		return vert_normal_index_reason(data, offset, length)
+	case LUMP_LEAFS_FACES, LUMP_PRIMINDICES:
 		if length % 2 != 0 {
 			return "size is not a multiple of 2"
 		}
@@ -321,7 +320,7 @@ lump_reason :: proc(data: []u8, index, offset, length: int) -> string {
 		}
 		return ""
 	case LUMP_DISP_LIGHTMAP_ALPHAS:
-		return ""
+		return disp_lightmap_alpha_reason(data, offset, length)
 	case LUMP_LEAF_AMBIENT, LUMP_LEAF_AMBIENT_HDR:
 		return leaf_ambient_reason(data, index, offset, length)
 	case LUMP_AREAS:
@@ -354,10 +353,7 @@ lump_reason :: proc(data: []u8, index, offset, length: int) -> string {
 		}
 		return ""
 	case LUMP_DISPINFO:
-		if length % 176 != 0 {
-			return "size is not a multiple of 176"
-		}
-		return ""
+		return dispinfo_reason(data, offset, length)
 	}
 	return "no reader"
 }
@@ -480,6 +476,134 @@ faces_reason :: proc(data: []u8, offset, length: int) -> string {
 		num_edges := int(read_i16(data, base + 8))
 		if num_edges < 0 || (surfedges_length > 0 && (first_edge < 0 || (first_edge + num_edges) * 4 > surfedges_length)) {
 			return "edge run past the surface edge lump"
+		}
+	}
+	return ""
+}
+
+// disp_power returns the grid power of a displacement record and refuses one
+// outside the range the corpus shows, so every displacement walk agrees on it.
+disp_power :: proc(data: []u8, record: int) -> (power: int, ok: bool) {
+	power = int(read_i32(data, record + 20))
+	return power, power >= 2 && power <= 4
+}
+
+// dispinfo_reason walks the displacement records: the vertex and triangle runs
+// they name must start where the previous record ended, every power must be in
+// range, and the two running totals must be exactly the two lump sizes they index.
+dispinfo_reason :: proc(data: []u8, offset, length: int) -> string {
+	if length % 176 != 0 {
+		return "size is not a multiple of 176"
+	}
+	verts := 0
+	tris := 0
+	for i in 0 ..< length / 176 {
+		record := offset + i * 176
+		power, power_ok := disp_power(data, record)
+		if !power_ok {
+			return "displacement power outside 2..4"
+		}
+		if int(read_i32(data, record + 12)) != verts {
+			return "a displacement vertex run does not continue the previous one"
+		}
+		if int(read_i32(data, record + 16)) != tris {
+			return "a displacement triangle run does not continue the previous one"
+		}
+		side := (1 << uint(power)) + 1
+		verts += side * side
+		tris += 2 * (1 << uint(power)) * (1 << uint(power))
+	}
+	if verts * 20 != lump_length(data, LUMP_DISPVERTS) {
+		return "the displacement vertex runs do not add up to the vertex lump"
+	}
+	if tris * 2 != lump_length(data, LUMP_DISPTRIS) {
+		return "the displacement triangle runs do not add up to the triangle lump"
+	}
+	return ""
+}
+
+// disp_tri_reason counts the displacement triangles: two bytes each, and the
+// displacement records say how many triangles every surface has (two per cell of
+// its grid), so the total is a cross count and not a divisibility test.
+disp_tri_reason :: proc(data: []u8, offset, length: int) -> string {
+	if length % 2 != 0 {
+		return "size is not a multiple of 2"
+	}
+	info_offset := lump_int(data, LUMP_DISPINFO, 0)
+	info_length := lump_int(data, LUMP_DISPINFO, 4)
+	if info_length <= 0 {
+		if length != 0 {
+			return "triangles without displacement info"
+		}
+		return ""
+	}
+	expected := 0
+	for i in 0 ..< info_length / 176 {
+		power, ok := disp_power(data, info_offset + i * 176)
+		if !ok {
+			return "displacement power outside 2..4"
+		}
+		cells := 1 << uint(power)
+		expected += 2 * cells * cells
+	}
+	if expected * 2 != length {
+		return "triangle count does not match the displacement infos"
+	}
+	return ""
+}
+
+// disp_lightmap_alpha_reason counts one byte per lightmap luxel of every face that
+// has a displacement: the face stores the luxel extent, so the total is exact.
+disp_lightmap_alpha_reason :: proc(data: []u8, offset, length: int) -> string {
+	faces_offset := lump_int(data, LUMP_FACES, 0)
+	faces_length := lump_int(data, LUMP_FACES, 4)
+	if faces_length <= 0 {
+		if length != 0 {
+			return "lightmap alphas without a face lump to count them against"
+		}
+		return ""
+	}
+	expected := 0
+	for i in 0 ..< faces_length / 56 {
+		face := faces_offset + i * 56
+		if read_u16(data, face + 12) == 0xffff {
+			continue
+		}
+		size_x := int(read_i32(data, face + 36))
+		size_y := int(read_i32(data, face + 40))
+		if size_x < 0 || size_y < 0 {
+			return "negative lightmap extent"
+		}
+		expected += (size_x + 1) * (size_y + 1)
+	}
+	if expected != length {
+		return "count is not one byte per displacement lightmap luxel"
+	}
+	return ""
+}
+
+// vert_normal_index_reason counts one normal index per vertex a face uses: the sum
+// of the face edge counts, and every index has to name a normal that exists.
+vert_normal_index_reason :: proc(data: []u8, offset, length: int) -> string {
+	faces_offset := lump_int(data, LUMP_FACES, 0)
+	faces_length := lump_int(data, LUMP_FACES, 4)
+	if faces_length <= 0 {
+		return ""
+	}
+	expected := 0
+	for i in 0 ..< faces_length / 56 {
+		expected += int(read_u16(data, faces_offset + i * 56 + 8))
+	}
+	if length != expected * 2 {
+		return "count is not one index per vertex a face uses"
+	}
+	normals := lump_length(data, LUMP_VERTNORMALS) / 12
+	if normals <= 0 {
+		return ""
+	}
+	for i in 0 ..< length / 2 {
+		if int(read_u16(data, offset + i * 2)) >= normals {
+			return "a normal index is past the normal lump"
 		}
 	}
 	return ""
