@@ -160,7 +160,7 @@ percent :: proc(part: i64, whole: i64) -> f64 {
 lump_reason :: proc(data: []u8, index, offset, length: int) -> string {
 	switch index {
 	case LUMP_ENTITIES, LUMP_PLANES, LUMP_TEXDATA, LUMP_VERTEXES, LUMP_NODES, LUMP_TEXINFO, LUMP_FACES, LUMP_LEAFS, LUMP_EDGES, LUMP_SURFEDGES, LUMP_MODELS, LUMP_LEAFBRUSHES, LUMP_BRUSHES, LUMP_BRUSHSIDES, LUMP_TEXDATA_STRING_DATA, LUMP_TEXDATA_STRING_TABLE:
-		return ""
+		return sized_lump_reason(data, index, offset, length)
 	case LUMP_LIGHTING, LUMP_LIGHTING_HDR:
 		return lighting_reason(data, index, offset, length)
 	case LUMP_PHYSDISP:
@@ -596,6 +596,50 @@ vectors_reason :: proc(data: []u8, offset, length: int) -> string {
 				return "non-finite vector component"
 			}
 		}
+	}
+	return ""
+}
+
+// sized_lump_reason validates the lumps whose record size is fixed and known.
+// The length must divide by the record size, which is the cheapest cross-check a
+// fixed-record lump has: it fails on a truncated or misaligned lump instead of
+// being credited for merely having a size.
+sized_lump_reason :: proc(data: []u8, index, offset, length: int) -> string {
+	stride := 0
+	switch index {
+	case LUMP_PLANES:
+		stride = 20
+	case LUMP_TEXDATA:
+		// CS:GO references the string table instead of carrying two char[64]
+		// arrays, which makes the record 32 bytes rather than 72.
+		stride = 32
+	case LUMP_VERTEXES:
+		stride = 12
+	case LUMP_NODES:
+		stride = 32
+	case LUMP_TEXINFO:
+		stride = 72
+	case LUMP_FACES:
+		stride = 56
+	case LUMP_LEAFS:
+		stride = leaf_stride(data)
+	case LUMP_EDGES, LUMP_SURFEDGES:
+		stride = 4
+	case LUMP_MODELS:
+		stride = 48
+	case LUMP_LEAFBRUSHES:
+		stride = 2
+	case LUMP_BRUSHES:
+		stride = 12
+	case LUMP_BRUSHSIDES:
+		stride = 8
+	case LUMP_ENTITIES, LUMP_TEXDATA_STRING_DATA, LUMP_TEXDATA_STRING_TABLE:
+		// Text blobs: the entity lump is a sequence of NUL terminated strings and
+		// the string table is a byte pool, so there is no record size to check.
+		return ""
+	}
+	if stride <= 0 || length % stride != 0 {
+		return fmt.aprintf("size is not a multiple of %d", stride)
 	}
 	return ""
 }

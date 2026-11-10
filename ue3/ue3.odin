@@ -754,9 +754,14 @@ package_index_name :: proc(pkg: ^Package, value: i32) -> string {
 	return ""
 }
 
-// export_class_name is the class of an export, resolved through the import table
-// (classes are always imports in a cooked package).
+// export_class_name is the class of an export. In a cooked package the class is
+// normally an import, but CrimeCraft also ships exports whose class index is
+// null: those are the package's own class objects, so they are labelled instead
+// of being left with an empty name (an empty row cannot be attributed).
 export_class_name :: proc(pkg: ^Package, e: Export) -> string {
+	if e.class_index == 0 {
+		return "(null class)"
+	}
 	return package_index_name(pkg, e.class_index)
 }
 

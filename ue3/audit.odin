@@ -331,7 +331,7 @@ audit_dump_text :: proc(pkg: ^Package) -> string {
 		class := export_class_name(pkg, e)
 		name := name_text(pkg, e.object_name)
 		if diag.has_errors(&head_d) {
-			fmt.sbprintf(&b, "EXPORT %d %s %s serial=%d size=%d HEAD-FAILED\n", index, class, name, e.serial_offset, e.serial_size)
+			fmt.sbprintf(&b, "EXPORT %d %s %s serial=%d size=%d class_index=%d outer=%d HEAD-FAILED\n", index, class, name, e.serial_offset, e.serial_size, e.class_index, e.outer_index)
 			delete(head_d.items)
 			continue
 		}
