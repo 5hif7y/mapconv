@@ -587,3 +587,39 @@ test_displacement_runs_add_up_to_their_lumps :: proc(t: ^testing.T) {
 	store_u16_bytes(data, 9216, 3) // only three normals exist
 	testing.expect_value(t, vert_normal_index_reason(data, 9216, 6), "a normal index is past the normal lump")
 }
+
+@(test)
+test_material_names_and_normals_are_cross_counted :: proc(t: ^testing.T) {
+	blob := transmute([]u8)string("DEV/DEV_TEST\x00METAL/METAL_WALL\x00")
+	testing.expect_value(t, texdata_string_data_reason(blob, 0, len(blob)), "")
+
+	// An empty name in the middle is not a name.
+	empty := transmute([]u8)string("A\x00\x00B\x00")
+	testing.expect_value(t, texdata_string_data_reason(empty, 0, len(empty)), "the material name blob holds an empty name")
+
+	// The table has to rise and start at zero, which the blob above does not.
+	data := make([]u8, 8192)
+	defer delete(data)
+	blob_offset := 1024
+	total := len(blob)
+	copy(data[blob_offset:], blob)
+	set_lump(data, 43, blob_offset, total)
+	set_lump(data, 44, 2048, 8)
+	store_i32(data, 2048, 0)
+	store_i32(data, 2052, 13) // "METAL/METAL_WALL" starts at 13
+	testing.expect_value(t, texdata_string_table_reason(data, 2048, 8), "")
+
+	store_i32(data, 2048, 3) // not the start of the blob
+	testing.expect_value(t, texdata_string_table_reason(data, 2048, 8), "the first name offset is not zero")
+
+	// Normals: as many as the indices use, and nothing else.
+	set_lump(data, 30, 3072, 3 * 12)
+	set_lump(data, 31, 4096, 6)
+	store_u16_bytes(data, 4096, 0)
+	store_u16_bytes(data, 4098, 1)
+	store_u16_bytes(data, 4100, 2)
+	testing.expect_value(t, vert_normal_reason(data, 3072, 36), "")
+
+	store_u16_bytes(data, 4100, 4) // index 4 does not exist with three normals
+	testing.expect_value(t, vert_normal_reason(data, 3072, 36), "the normal lump does not hold exactly the normals the indices use")
+}

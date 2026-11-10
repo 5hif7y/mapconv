@@ -261,7 +261,11 @@ lump_reason :: proc(data: []u8, index, offset, length: int) -> string {
 		return ""
 	case LUMP_ENTITIES:
 		return entities_reason(data, offset, length)
-	case LUMP_PLANES, LUMP_TEXDATA, LUMP_VERTEXES, LUMP_NODES, LUMP_TEXINFO, LUMP_FACES, LUMP_EDGES, LUMP_SURFEDGES, LUMP_MODELS, LUMP_LEAFBRUSHES, LUMP_BRUSHES, LUMP_BRUSHSIDES, LUMP_TEXDATA_STRING_DATA, LUMP_TEXDATA_STRING_TABLE:
+	case LUMP_TEXDATA_STRING_DATA:
+		return texdata_string_data_reason(data, offset, length)
+	case LUMP_TEXDATA_STRING_TABLE:
+		return texdata_string_table_reason(data, offset, length)
+	case LUMP_PLANES, LUMP_TEXDATA, LUMP_VERTEXES, LUMP_NODES, LUMP_TEXINFO, LUMP_FACES, LUMP_EDGES, LUMP_SURFEDGES, LUMP_MODELS, LUMP_LEAFBRUSHES, LUMP_BRUSHES, LUMP_BRUSHSIDES:
 		return sized_lump_reason(data, index, offset, length)
 	case LUMP_LIGHTING, LUMP_LIGHTING_HDR:
 		return lighting_reason(data, index, offset, length)
@@ -288,10 +292,7 @@ lump_reason :: proc(data: []u8, index, offset, length: int) -> string {
 	case LUMP_VISIBILITY:
 		return visibility_reason(data, offset, length)
 	case LUMP_VERTNORMALS:
-		if length % 12 != 0 {
-			return "size is not a multiple of 12"
-		}
-		return ""
+		return vert_normal_reason(data, offset, length)
 	case LUMP_FACEIDS:
 		// Two bytes per face in face order. The identifiers are arbitrary (they are
 		// not face indices and they repeat), so the count is the check.
@@ -578,6 +579,86 @@ disp_lightmap_alpha_reason :: proc(data: []u8, offset, length: int) -> string {
 	}
 	if expected != length {
 		return "count is not one byte per displacement lightmap luxel"
+	}
+	return ""
+}
+
+// texdata_string_data_reason reads the material name blob: NUL terminated names with
+// no empty one in between, ending on a terminator.
+texdata_string_data_reason :: proc(data: []u8, offset, length: int) -> string {
+	if length <= 0 {
+		return "empty material name blob"
+	}
+	if data[offset + length - 1] != 0 {
+		return "the material name blob does not end with a terminator"
+	}
+	for i in 1 ..< length {
+		if data[offset + i] == 0 && data[offset + i - 1] == 0 {
+			return "the material name blob holds an empty name"
+		}
+	}
+	return ""
+}
+
+// texdata_string_table_reason reads the offsets into that blob: the first is zero,
+// they rise strictly, and each lands on the first byte of a name.
+texdata_string_table_reason :: proc(data: []u8, offset, length: int) -> string {
+	if length % 4 != 0 {
+		return "size is not a multiple of 4"
+	}
+	names := lump_int(data, LUMP_TEXDATA_STRING_DATA, 4)
+	data_offset := lump_int(data, LUMP_TEXDATA_STRING_DATA, 0)
+	if names <= 0 {
+		return "no material name blob to index"
+	}
+	previous := -1
+	for i in 0 ..< length / 4 {
+		at := int(read_i32(data, offset + i * 4))
+		if at < 0 || at >= names {
+			return "a name offset is outside the name blob"
+		}
+		if i == 0 && at != 0 {
+			return "the first name offset is not zero"
+		}
+		if at <= previous {
+			return "name offsets do not rise"
+		}
+		if at > 0 && data[data_offset + at - 1] != 0 {
+			return "a name offset does not start a name"
+		}
+		previous = at
+	}
+	return ""
+}
+
+// vert_normal_reason reads the normal array: twelve bytes each and exactly as many
+// as the index lump uses, which is a cross count against the faces.
+vert_normal_reason :: proc(data: []u8, offset, length: int) -> string {
+	if length % 12 != 0 {
+		return "size is not a multiple of 12"
+	}
+	for i in 0 ..< length / 12 {
+		base := offset + i * 12
+		for k in 0 ..< 3 {
+			value := read_f32(data, base + k * 4)
+			if !(value == value) || value > 1e30 || value < -1e30 {
+				return "non-finite normal component"
+			}
+		}
+	}
+	index_length := lump_length(data, LUMP_VERTNORMALINDICES)
+	if index_length <= 0 {
+		return ""
+	}
+	highest := -1
+	for i in 0 ..< index_length / 2 {
+		value := int(read_u16(data, lump_int(data, LUMP_VERTNORMALINDICES, 0) + i * 2))
+		if value > highest {
+			highest = value
+		}
+	}
+	if (highest + 1) * 12 != length {
+		return "the normal lump does not hold exactly the normals the indices use"
 	}
 	return ""
 }
