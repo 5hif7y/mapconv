@@ -253,6 +253,12 @@ lump_reason :: proc(data: []u8, index, offset, length: int) -> string {
 		return vectors_reason(data, offset, length)
 	case LUMP_LEAF_WATER_DATA:
 		return leaf_water_reason(data, offset, length)
+	case LUMP_DISP_MULTIBLEND:
+		return disp_multi_blend_reason(data, offset, length)
+	case LUMP_CUBEMAPS:
+		return cubemaps_reason(data, index, offset, length)
+	case LUMP_OCCLUSION:
+		return occlusion_reason(data, offset, length)
 	case LUMP_DISP_LIGHTMAP_SAMPLE_POSITIONS:
 		return disp_sample_positions_reason(data, offset, length)
 	case LUMP_WORLDLIGHTS, LUMP_WORLDLIGHTS_HDR:
@@ -652,6 +658,130 @@ sized_lump_reason :: proc(data: []u8, index, offset, length: int) -> string {
 	}
 	if stride <= 0 || length % stride != 0 {
 		return fmt.aprintf("size is not a multiple of %d", stride)
+	}
+	return ""
+}
+
+// disp_multi_blend_reason validates lump 63. The index has no entry in the lump
+// name table this build ships (which stops at 62) and no function of engine.dll
+// requests it, so the engine never reads it; only one map of the corpus carries
+// it. The layout is nevertheless plain: 80 byte blocks of twenty floats in which
+// the first four are blend weights in [0, 1], the next four are zero and the last
+// twelve are one, in every block of the only map that has the lump, so those
+// constants are the check.
+disp_multi_blend_reason :: proc(data: []u8, offset, length: int) -> string {
+	block_bytes := 80
+	if length % block_bytes != 0 {
+		return "the multi blend lump is not a whole number of blocks"
+	}
+	for block in 0 ..< length / block_bytes {
+		base := offset + block * block_bytes
+		for field in 0 ..< 4 {
+			value := read_f32(data, base + field * 4)
+			if !(value == value) || value < 0 || value > 1 {
+				return "a multi blend weight is outside the unit range"
+			}
+		}
+		for field in 4 ..< 8 {
+			if read_f32(data, base + field * 4) != 0 {
+				return "a multi blend block does not carry its zero run"
+			}
+		}
+		for field in 8 ..< 20 {
+			if read_f32(data, base + field * 4) != 1 {
+				return "a multi blend block does not carry its saturated run"
+			}
+		}
+	}
+	return ""
+}
+
+// cubemaps_reason validates the cubemap samples. The lump has two layouts, chosen
+// by its descriptor version, and the engine only implements the first:
+//
+//   version 0, 16 bytes: three integer coordinates and a small size word
+//   version 1, 52 bytes: those three coordinates, the size word, then the
+//                        origin and the extents of the sampled volume as floats
+//
+// The second form is what a map compiled with baked cubemap volumes carries. The
+// reader accepts both, requires the lump to be a whole number of records, and
+// checks the geometry: the volume origin has to be finite and inside the world and
+// its extents cannot be negative, which no record of the corpus violates while
+// garbage would.
+cubemaps_reason :: proc(data: []u8, index, offset, length: int) -> string {
+	version := lump_int(data, index, 8)
+	stride := 16
+	switch version {
+	case 0:
+	case 1:
+		stride = 52
+	case:
+		return "the cubemap lump has an unknown version"
+	}
+	if length % stride != 0 {
+		return "the cubemap lump is not a whole number of records"
+	}
+	for record in 0 ..< length / stride {
+		base := offset + record * stride
+		for axis in 0 ..< 3 {
+			coordinate := int(read_i32(data, base + axis * 4))
+			if coordinate < -(1 << 20) || coordinate > 1 << 20 {
+				return "a cubemap origin is outside the map"
+			}
+		}
+		if version == 0 {
+			size := int(read_i32(data, base + 12))
+			if size < 0 || size > 16 {
+				return "a cubemap carries an unexpected size"
+			}
+			continue
+		}
+		for field in 0 ..< 6 {
+			value := read_f32(data, base + 16 + field * 4)
+			if !(value == value) || value > 20000 || value < -20000 {
+				return "a cubemap volume is not a finite world space box"
+			}
+			if field >= 3 && value < 0 {
+				return "a cubemap volume has a negative extent"
+			}
+		}
+	}
+	return ""
+}
+
+// occlusion_reason validates the occluder lump. engine.dll loads it with
+// FUN_180103520 and reads three counted arrays (Mod_LoadOcclusion, descriptor
+// version 2 in every shipped map):
+//
+//   u32 occluder count, count * 40 byte records
+//   u32 poly count,     count * 12 byte records
+//   u32 vertex count,   count * 4  byte records
+//
+// The three counts are independent numbers, so the cursor only lands on the end
+// of the lump when all of them agree with its length; an empty lump is twelve
+// zero bytes, which the same walk consumes exactly.
+occlusion_reason :: proc(data: []u8, offset, length: int) -> string {
+	pos := 0
+	sections := [3]struct {
+		stride: int,
+		name:   string,
+	}{{40, "occluder"}, {12, "occluder poly"}, {4, "occluder vertex"}}
+	for section in sections {
+		if pos + 4 > length {
+			return "the occlusion lump ends before a count"
+		}
+		count := int(read_i32(data, offset + pos))
+		pos += 4
+		if count < 0 || count > length / section.stride {
+			return "an occlusion count does not fit the lump"
+		}
+		pos += count * section.stride
+		if pos > length {
+			return "an occlusion run leaves the lump"
+		}
+	}
+	if pos != length {
+		return "the occlusion arrays do not reach the end of the lump"
 	}
 	return ""
 }
