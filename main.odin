@@ -662,6 +662,8 @@ run_extract :: proc(args: Args, text: string) {
 	total := 0
 	written := 0
 	skipped := 0
+	used_names := make(map[string]bool, 256)
+	defer delete(used_names)
 	meshes := 0
 	obj_files := 0
 	referenced_meshes := 0
@@ -680,6 +682,17 @@ run_extract :: proc(args: Args, text: string) {
 			continue
 		}
 		name := ue3.name_text(&pkg, e.object_name)
+		// Two exports may share a name (CrimeCraft.u has two Texture2D objects
+		// called Black). Writing both to the same file mixed the pair on disk and
+		// made the round-trip check compare the DDS of one against the VTF of the
+		// other, so repeats get a stable suffix from the export index.
+		if name in used_names {
+			name = fmt.aprintf("%s_%d", name, i)
+			if name in used_names {
+				name = fmt.aprintf("%s_%d", name, i)
+			}
+		}
+		used_names[name] = true
 		path := fmt.aprintf("%s/%s.dds", args.output, name)
 		if os.write_entire_file(path, bytes) != nil {
 			fmt.eprintfln("mapconv: cannot write %q", path)
