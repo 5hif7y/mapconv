@@ -314,6 +314,16 @@ run_extract_bsp :: proc(args: Args, text: string) {
 		os.exit(2)
 	}
 	offset, length := file.header[bsp.LUMP_PAKFILE][0], file.header[bsp.LUMP_PAKFILE][1]
+	// The archive is verified before a single file is written: the CRC32 of every
+	// entry is checked against the directory and the records have to tile the lump.
+	// Writing the assets of a damaged archive would put wrong textures on a map.
+	if length > 0 {
+		report := bsp.verify_pakfile(data, offset, length)
+		if report.reason != "" {
+			fmt.eprintfln("mapconv: the pakfile of %s does not verify: %s", args.input, report.reason)
+			os.exit(1)
+		}
+	}
 	entries, pak_d := bsp.read_pakfile(data, offset, length)
 	merge_diags(&diagnostics, &pak_d)
 	written := 0
