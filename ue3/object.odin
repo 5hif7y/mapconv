@@ -108,18 +108,27 @@ read_object_head :: proc(
 		return second, second_d
 	}
 	delete(second_d.items)
+	// A class default object of a component class carries no prelude, even though
+	// its class name ends in "Component": UComponent::PreSerialize only writes one
+	// for a subobject that has a template owner. Try the bare NetIndex first.
+	third, third_d := read_object_head_ex(pkg, e, allocator, false, true)
+	if !diag.has_errors(&third_d) {
+		delete(first_d.items)
+		return third, third_d
+	}
+	delete(third_d.items)
 	// The components of an archetype (the subobjects of a Default__ object) are
 	// saved with a sixteen byte prelude before their tagged defaults: a zero
 	// word, the subobject name and the export's own linker index. That index is
 	// the check: the prelude cannot be mistaken for anything else because the
 	// word has to equal the export it belongs to.
 	if export_index >= 0 {
-		third, third_d := read_object_head_subobject(pkg, e, allocator, export_index)
-		if !diag.has_errors(&third_d) {
+		sub, sub_d := read_object_head_subobject(pkg, e, allocator, export_index)
+		if !diag.has_errors(&sub_d) {
 			delete(first_d.items)
-			return third, third_d
+			return sub, sub_d
 		}
-		delete(third_d.items)
+		delete(sub_d.items)
 	}
 	return first, first_d
 }
@@ -278,6 +287,7 @@ read_object_head_ex :: proc(
 	e: Export,
 	allocator := context.allocator,
 	force_component := false,
+	no_preamble := false,
 ) -> (head: Object_Head, d: diag.Diagnostics) {
 	d = diag.init()
 	if e.serial_offset < 0 || e.serial_size < 0 || int(e.serial_offset) + int(e.serial_size) > len(pkg.data) {
@@ -327,7 +337,7 @@ read_object_head_ex :: proc(
 	}
 
 	// Components serialize their template owner class before the object prelude.
-	if force_component || is_component_class(pkg, e) {
+	if !no_preamble && (force_component || is_component_class(pkg, e)) {
 		head.template_owner_class = read_i32(&r)
 		head.has_template_owner = true
 		if e.object_flags & RF_CLASS_DEFAULT_OBJECT != 0 {

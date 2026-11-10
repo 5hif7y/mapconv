@@ -403,8 +403,8 @@ audit_dump_text :: proc(pkg: ^Package) -> string {
 		name := name_text(pkg, e.object_name)
 		if diag.has_errors(&head_d) {
 			why := ""
-			if len(head_d.items) > 0 {
-				why = head_d.items[0].message
+			for item in head_d.items {
+				why = fmt.aprintf("%s | %s", why, item.message)
 			}
 			fmt.sbprintf(&b, "EXPORT %d %s %s serial=%d size=%d class_index=%d outer=%d super=%d archetype=%d HEAD-FAILED %s\n", index, class, name, e.serial_offset, e.serial_size, e.class_index, e.outer_index, e.super_index, e.archetype_index, why)
 			delete(head_d.items)
