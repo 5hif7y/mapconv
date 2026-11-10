@@ -163,6 +163,8 @@ lump_reason :: proc(data: []u8, index, offset, length: int) -> string {
 		return ""
 	case LUMP_LIGHTING, LUMP_LIGHTING_HDR:
 		return lighting_reason(data, index, offset, length)
+	case LUMP_PHYSDISP:
+		return phys_disp_reason(data, offset, length)
 	case LUMP_PHYSCOLLIDE, LUMP_PHYSCOLLIDESURFACE:
 		return phys_collide_reason(data, offset, length)
 	case LUMP_PAKFILE:
@@ -611,4 +613,35 @@ leaf_water_reason :: proc(data: []u8, offset, length: int) -> string {
 		}
 	}
 	return ""
+}
+
+// phys_disp_reason: per displacement physics. The lump is a 16 bit count that
+// equals the displacement info count, one 16 bit byte size per displacement and
+// then the blobs, in order. Every size is consumed, so the lump closes exactly and
+// the count cross-checks against the displacement lump.
+phys_disp_reason :: proc(data: []u8, offset, length: int) -> string {
+	if length < 4 {
+		return "shorter than the displacement count"
+	}
+	count := int(read_u16(data, offset))
+	disps := lump_length(data, LUMP_DISPINFO) / 176
+	if count != disps {
+		return "count does not match the displacement info lump"
+	}
+	blobs := 2 + count * 2
+	if blobs > length {
+		return "size table past the lump"
+	}
+	total := blobs
+	for i in 0 ..< count {
+		total += int(read_u16(data, offset + 2 + i * 2))
+	}
+	if total != length {
+		return "blob sizes do not add up to the lump"
+	}
+	return ""
+}
+
+lump_length :: proc(data: []u8, index: int) -> int {
+	return lump_int(data, index, 4)
 }
