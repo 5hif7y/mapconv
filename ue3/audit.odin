@@ -26,6 +26,9 @@ Audit_Object :: struct {
 	interpreted: i64,
 	offset:      i64,
 	reason:      string,
+	// detail carries the first diagnostic of the reader that failed, so a
+	// residual can be classified from the report instead of a debugger.
+	detail:      string,
 }
 
 Audit :: struct {
@@ -67,6 +70,7 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 			continue
 		}
 		class := export_class_name(pkg, e)
+		detail: string = ""
 		row := audit_row(&audit, class, allocator)
 		row.count += 1
 		row.payload += i64(e.serial_size)
@@ -250,6 +254,8 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 			_, mat_d := read_material_body(pkg, index, allocator)
 			if !diag.has_errors(&mat_d) {
 				interpreted = i64(e.serial_size)
+			} else if len(mat_d.items) > 0 {
+				detail = mat_d.items[0].message
 			}
 			delete(mat_d.items)
 		case "ModelComponent":
@@ -310,6 +316,7 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 				interpreted = interpreted,
 				offset = i64(e.serial_offset),
 				reason = reason,
+				detail = detail,
 			})
 		}
 	}
@@ -413,6 +420,9 @@ audit_objects_text :: proc(audit: ^Audit) -> string {
 			o.offset,
 			o.object_name,
 		)
+		if len(o.detail) > 0 {
+			fmt.sbprintf(&b, "      %s\n", o.detail)
+		}
 	}
 	return strings.to_string(b)
 }

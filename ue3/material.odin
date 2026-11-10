@@ -169,7 +169,9 @@ skip_expression :: proc(r: ^Reader, pkg: ^Package, type_name: string) -> bool {
 		params = 0
 	case "FMaterialUniformExpressionTexture":
 		params = 4
-	case "FMaterialUniformExpressionTextureParameter":
+	case "FMaterialUniformExpressionTextureParameter",
+	     "FMaterialUniformExpressionFlipBookTextureParameter":
+		// The flip book variant adds nothing to the texture parameter layout.
 		params = 12
 	case "FMaterialUniformExpressionScalarParameter":
 		params = 12
@@ -185,6 +187,16 @@ skip_expression :: proc(r: ^Reader, pkg: ^Package, type_name: string) -> bool {
 	     "FMaterialUniformExpressionOneMinus", "FMaterialUniformExpressionSaturate":
 		// one nested expression
 		return skip_uniform_array_element(r, pkg)
+	case "FMaterialUniformExpressionTransformRange":
+		// Vogster's addition: A, InputLeftVal, InputRightVal, OutputLeftVal and
+		// OutputRightVal, five nested expressions in that order
+		// (Engine/Src/MaterialShared.cpp:3822).
+		for _ in 0 ..< 5 {
+			if !skip_uniform_array_element(r, pkg) {
+				return false
+			}
+		}
+		return true
 	case "FMaterialUniformExpressionClamp":
 		// Input, Min and Max
 		if !skip_uniform_array_element(r, pkg) || !skip_uniform_array_element(r, pkg) || !skip_uniform_array_element(r, pkg) {
