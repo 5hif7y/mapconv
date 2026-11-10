@@ -638,3 +638,83 @@ read_ui_dynamic_field_provider :: proc(
 	}
 	return
 }
+
+// UPrefabInstance keeps the map of its own subobjects: the measured tail is a count,
+// that many pairs of a name index and an object reference, and one closing zero. The
+// reader checks both fields of every pair, so a wrong count cannot pass.
+read_prefab_instance :: proc(
+	pkg: ^Package,
+	export_index: int,
+	allocator := context.allocator,
+) -> (entries: int, d: diag.Diagnostics) {
+	d = diag.init()
+	if export_index < 0 || export_index >= len(pkg.exports) {
+		diag.err(&d, "ue3.bad-export", fmt.aprintf("export index %d out of range", export_index))
+		return
+	}
+	head, head_d := read_object_head(pkg, pkg.exports[export_index], allocator, export_index)
+	if diag.has_errors(&head_d) {
+		d = head_d
+		return
+	}
+	delete(head_d.items)
+	r := Reader{data = pkg.data, pos = head.body_offset, limit = head.end_offset}
+	count := read_i32(&r)
+	if r.failed || count < 0 || i64(count) * 8 + 4 != i64(head.end_offset - r.pos) {
+		diag.err(&d, "ue3.bad-prefab", fmt.aprintf("a prefab of %d subobjects cannot hold the tail", count))
+		return
+	}
+	for _ in 0 ..< count {
+		name := read_i32(&r)
+		object := read_i32(&r)
+		if r.failed || name < 0 || int(name) >= len(pkg.names) {
+			diag.err(&d, "ue3.bad-prefab", fmt.aprintf("name %d is outside the name table", name))
+			return
+		}
+		if !valid_object_reference(pkg, object) {
+			diag.err(&d, "ue3.bad-prefab", fmt.aprintf("%d is not an object reference", object))
+			return
+		}
+	}
+	closing := read_i32(&r)
+	if closing != 0 {
+		diag.err(&d, "ue3.bad-prefab", fmt.aprintf("the prefab closes with %d instead of zero", closing))
+		return
+	}
+	entries = int(count)
+	return
+}
+
+// UUISkin has no serializer in the tree; its measured tail is one zero word.
+// Anything else is reported instead of credited.
+read_ui_skin :: proc(
+	pkg: ^Package,
+	export_index: int,
+	allocator := context.allocator,
+) -> (d: diag.Diagnostics) {
+	d = diag.init()
+	if export_index < 0 || export_index >= len(pkg.exports) {
+		diag.err(&d, "ue3.bad-export", fmt.aprintf("export index %d out of range", export_index))
+		return
+	}
+	head, head_d := read_object_head(pkg, pkg.exports[export_index], allocator, export_index)
+	if diag.has_errors(&head_d) {
+		d = head_d
+		return
+	}
+	delete(head_d.items)
+	if head.end_offset - head.body_offset != 4 {
+		diag.err(
+			&d,
+			"ue3.unexpected-ui-skin-tail",
+			fmt.aprintf("%d trailing bytes instead of one zero word", head.end_offset - head.body_offset),
+		)
+		return
+	}
+	value := read_i32(&Reader{data = pkg.data, pos = head.body_offset, limit = head.end_offset})
+	if value != 0 {
+		diag.err(&d, "ue3.unexpected-ui-skin-tail", fmt.aprintf("the trailing word is %d", value))
+		return
+	}
+	return
+}

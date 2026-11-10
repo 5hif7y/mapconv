@@ -142,6 +142,14 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 			}
 			delete(texture.mips)
 			delete(texture_d.items)
+		case "TextureRenderTarget2D", "TextureRenderTargetCube", "TextureRenderTarget":
+			rtt_d := read_texture_render_target(pkg, index, allocator)
+			if !diag.has_errors(&rtt_d) {
+				interpreted = i64(e.serial_size)
+			} else if len(rtt_d.items) > 0 && detail == "" {
+				detail = rtt_d.items[0].message
+			}
+			delete(rtt_d.items)
 		case "SkeletalMesh":
 			_, skel_d := read_skeletal_mesh(pkg, index, allocator)
 			if !diag.has_errors(&skel_d) {
@@ -205,6 +213,23 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 				detail = style_d.items[0].message
 			}
 			delete(style_d.items)
+		case "PrefabInstance":
+			entries, prefab_d := read_prefab_instance(pkg, index, allocator)
+			if !diag.has_errors(&prefab_d) {
+				interpreted = i64(e.serial_size)
+			} else if len(prefab_d.items) > 0 && detail == "" {
+				detail = prefab_d.items[0].message
+			}
+			_ = entries
+			delete(prefab_d.items)
+		case "UISkin":
+			skin_d := read_ui_skin(pkg, index, allocator)
+			if !diag.has_errors(&skin_d) {
+				interpreted = i64(e.serial_size)
+			} else if len(skin_d.items) > 0 && detail == "" {
+				detail = skin_d.items[0].message
+			}
+			delete(skin_d.items)
 		case "UIDynamicFieldProvider":
 			field_d := read_ui_dynamic_field_provider(pkg, index, allocator)
 			if !diag.has_errors(&field_d) {

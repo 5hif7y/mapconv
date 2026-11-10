@@ -535,3 +535,45 @@ dds_bytes :: proc(texture: ^Texture) -> ([]u8, bool) {
 append_u32 :: proc(out: ^[dynamic]u8, value: u32) {
 	append(out, u8(value), u8(value >> 8), u8(value >> 16), u8(value >> 24))
 }
+
+// UTextureRenderTarget2D and its cube sibling extend Texture2D, so their payload is
+// the texture followed by the render target fields; what the cooker leaves at the
+// end is the same sixteen byte FUntypedBulkData header that TextureCube carries:
+// three reserved words and the offset of the stripped source art. The offset has to
+// fall inside the package, which is the check.
+read_texture_render_target :: proc(
+	pkg: ^Package,
+	export_index: int,
+	allocator := context.allocator,
+) -> (d: diag.Diagnostics) {
+	d = diag.init()
+	if export_index < 0 || export_index >= len(pkg.exports) {
+		diag.err(&d, "ue3.bad-export", fmt.aprintf("export index %d out of range", export_index))
+		return
+	}
+	e := pkg.exports[export_index]
+	head, head_d := read_object_head(pkg, e, allocator, export_index)
+	if diag.has_errors(&head_d) {
+		d = head_d
+		return
+	}
+	delete(head_d.items)
+	tail := head.end_offset - head.body_offset
+	if tail != 16 {
+		diag.err(&d, "ue3.bad-render-target", fmt.aprintf("%d trailing bytes, expected the bulk header", tail))
+		return
+	}
+	r := Reader{data = pkg.data, pos = head.body_offset, limit = head.end_offset}
+	for i in 0 ..< 12 {
+		if read_u8(&r) != 0 {
+			diag.err(&d, "ue3.bad-render-target", fmt.aprintf("bulk header byte %d is not reserved", i))
+			return
+		}
+	}
+	offset := read_i32(&r)
+	if r.failed || offset <= e.serial_offset || i64(offset) > i64(len(pkg.data)) {
+		diag.err(&d, "ue3.bad-render-target", fmt.aprintf("source art offset %d is outside the package", offset))
+		return
+	}
+	return
+}
