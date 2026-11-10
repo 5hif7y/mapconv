@@ -87,6 +87,19 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 		}
 		delete(head_d.items)
 
+		// A class export is not an object with tagged properties: its body is the
+		// class record. Those exports carry no class reference of their own, which
+		// is why the object head cannot read them.
+		if head_failed && e.class_index == 0 {
+			_, class_d := read_class_body(pkg, index)
+			if !diag.has_errors(&class_d) {
+				interpreted = i64(e.serial_size)
+			} else if len(class_d.items) > 0 && detail == "" {
+				detail = class_d.items[0].message
+			}
+			delete(class_d.items)
+		}
+
 		// UI component templates serialize the component prelude (template owner
 		// class plus net index) even though their class name does not end in
 		// "Component". The prelude and the tag stream are credited byte by byte.
