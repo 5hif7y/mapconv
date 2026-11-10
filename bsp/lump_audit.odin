@@ -8,6 +8,7 @@
 package bsp
 
 import "core:fmt"
+import "core:slice"
 import "core:strings"
 
 // Source 1 (BSP version 20) lump table, in header order.
@@ -349,9 +350,13 @@ lump_reason :: proc(data: []u8, index, offset, length: int) -> string {
 	return "no reader"
 }
 
-// lighting_reason validates the lightmap sample array: 4 bytes per ColorRGBExp32
-// sample, and every lit face's sample block inside the lump (lightofs is a byte
-// offset into this lump, the extent comes from the face luxel size).
+// lighting_reason checks the lightmap sample array against the faces that point
+// into it. What holds over the whole corpus is containment and disjointness: every
+// block starts inside the lump and no two blocks overlap. What does not hold is
+// tiling: the lightmap blocks of the faces cover only about a third of the lump
+// (measured: 325 MB of 922 MB over the 82 maps), because the writer also stores
+// something this reader does not attribute to a face. The check below therefore
+// proves the face side of the lump and says nothing about the rest.
 lighting_reason :: proc(data: []u8, index, offset, length: int) -> string {
 	if length % 4 != 0 {
 		return "size is not a multiple of 4"
@@ -369,7 +374,10 @@ lighting_reason :: proc(data: []u8, index, offset, length: int) -> string {
 	if faces_offset < 0 || faces_offset + faces_length > len(data) {
 		return "faces lump out of range"
 	}
-	for i in 0 ..< faces_length / 56 {
+	count := faces_length / 56
+	blocks := make([dynamic]Lightmap_Block, 0, count, context.allocator)
+	defer delete(blocks)
+	for i in 0 ..< count {
 		face := faces_offset + i * 56
 		lightofs := int(read_i32(data, face + 20))
 		if lightofs < 0 {
@@ -384,8 +392,22 @@ lighting_reason :: proc(data: []u8, index, offset, length: int) -> string {
 		if extent > i64(length) {
 			return "lightmap sample block past the lump"
 		}
+		append(&blocks, Lightmap_Block{start = lightofs, end = int(extent)})
+	}
+	// Two faces may not claim the same bytes: a shared or overlapping block means
+	// one of the two offsets is not a sample offset at all.
+	slice.sort_by(blocks[:], proc(a, b: Lightmap_Block) -> bool { return a.start < b.start })
+	for i in 1..<len(blocks) {
+		if blocks[i].start < blocks[i - 1].end {
+			return "two lightmap blocks overlap"
+		}
 	}
 	return ""
+}
+
+Lightmap_Block :: struct {
+	start: int,
+	end:   int,
 }
 
 // phys_collide_reason walks the per-model collision chain: a 16 byte header

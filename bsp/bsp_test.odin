@@ -369,3 +369,45 @@ test_pakfile_is_verified_by_crc_and_tiling :: proc(t: ^testing.T) {
 	broken[len(data) - 12] = 9
 	testing.expect(t, verify_pakfile(broken, 0, len(broken)).reason != "", "a wrong entry count has to be reported")
 }
+
+// A minimal map with a faces lump and a lighting lump: two faces of 2x2 luxels,
+// the first at the start of the lump and the second far enough that the blocks do
+// not touch.
+build_lighting_map :: proc(second_lightofs: i32) -> []u8 {
+	data := make([]u8, 4096)
+	store_i32(data, 0, 20) // version
+	faces_offset := 1024
+	lighting_offset := 2048
+	lighting_length := 256
+	// Lump 7 (faces): two 56 byte records.
+	store_i32(data, 8 + 7 * 16, i32(faces_offset))
+	store_i32(data, 8 + 7 * 16 + 4, 112)
+	store_i32(data, faces_offset + 0 * 56 + 20, 0) // lightofs
+	store_i32(data, faces_offset + 0 * 56 + 36, 1) // size x: 2 luxels
+	store_i32(data, faces_offset + 0 * 56 + 40, 1) // size y: 2 luxels
+	store_i32(data, faces_offset + 1 * 56 + 20, second_lightofs)
+	store_i32(data, faces_offset + 1 * 56 + 36, 1)
+	store_i32(data, faces_offset + 1 * 56 + 40, 1)
+	// Lump 8 (lighting).
+	store_i32(data, 8 + 8 * 16, i32(lighting_offset))
+	store_i32(data, 8 + 8 * 16 + 4, i32(lighting_length))
+	return data
+}
+
+@(test)
+test_lightmap_blocks_may_not_overlap :: proc(t: ^testing.T) {
+	data := build_lighting_map(64)
+	defer delete(data)
+	testing.expect_value(t, lighting_reason(data, 8, 2048, 256), "")
+
+	// Move the second face on top of the first: two faces cannot claim the same
+	// samples, so one of the two offsets is not a sample offset.
+	clash := build_lighting_map(8)
+	defer delete(clash)
+	testing.expect_value(t, lighting_reason(clash, 8, 2048, 256), "two lightmap blocks overlap")
+
+	// A block that runs past the lump is caught as well.
+	past := build_lighting_map(250)
+	defer delete(past)
+	testing.expect_value(t, lighting_reason(past, 8, 2048, 256), "lightmap sample block past the lump")
+}
