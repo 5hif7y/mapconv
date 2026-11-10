@@ -155,14 +155,23 @@ read_object_head_subobject :: proc(
 		diag.err(&d, "ue3.bad-subobject-prelude", fmt.aprintf("prelude opens with %d instead of zero", zero))
 		return
 	}
-	if own != i32(export_index) {
+	// The prelude names the subobject itself, so the name has to be the one the
+	// export table gives to this export. The third word is the net index, which a
+	// cooked package sets from the linker index but which is not one: it is often
+	// the export index and just as often that plus one, so it cannot be the check.
+	if name.index != e.object_name.index {
 		diag.err(
 			&d,
 			"ue3.bad-subobject-prelude",
-			fmt.aprintf("prelude names export %d instead of %d", own, export_index),
+			fmt.aprintf("prelude names name %d instead of %d", name.index, e.object_name.index),
 		)
 		return
 	}
+	if own < 0 {
+		diag.err(&d, "ue3.bad-subobject-prelude", fmt.aprintf("negative net index %d", own))
+		return
+	}
+	_ = export_index
 	tags := read_tag_stream(pkg, &r, head.end_offset, int(e.serial_size), allocator, &d)
 	if diag.has_errors(&d) {
 		return
