@@ -94,7 +94,15 @@ Lump_Audit :: struct {
 	// (there is a tail after the last lump), so the coverage is measured against
 	// this and not against the lump sum.
 	file_bytes:    i64,
+	// padding counts the bytes no lump claims that are zero: every lump starts on
+	// a four byte boundary, so the writer leaves up to three bytes between them.
+	padding:       i64,
 }
+
+// HEADER_BYTES is the ident, the version, the 64 lump descriptors and the map
+// revision that follows them: the first lump starts at 1,036 in every file of the
+// corpus, and the four bytes between 1,032 and it hold the revision number.
+HEADER_BYTES :: 8 + HEADER_LUMPS * 16 + 4
 
 // audit_lumps reports one row per non-empty lump. The caller owns the result.
 audit_lumps :: proc(data: []u8) -> Lump_Audit {
@@ -104,6 +112,8 @@ audit_lumps :: proc(data: []u8) -> Lump_Audit {
 	}
 	result.file_bytes = i64(len(data))
 	rows := make([dynamic]Lump_Row, 0, HEADER_LUMPS, context.allocator)
+	spans := make([dynamic][2]int, 0, HEADER_LUMPS, context.allocator)
+	defer delete(spans)
 	for i in 0 ..< HEADER_LUMPS {
 		base := 8 + i * 16
 		offset := int(read_i32(data, base))
@@ -124,9 +134,57 @@ audit_lumps :: proc(data: []u8) -> Lump_Audit {
 			result.uninterpreted += i64(length)
 		}
 		append(&rows, row)
+		append(&spans, {offset, offset + length})
 	}
 	result.rows = rows[:]
+	result.padding = padding_bytes(data, spans[:])
 	return result
+}
+
+// padding_bytes measures the bytes no lump claims and that are zero. Every lump
+// starts on a four byte boundary, so the writer leaves up to three bytes between
+// them; anything that is not zero stays in the residual, so a gap with content can
+// never be credited by accident. Spans are sorted here because the lump table is
+// in id order, not in file order.
+padding_bytes :: proc(data: []u8, spans_in: [][2]int) -> i64 {
+	spans := make([][2]int, len(spans_in), context.allocator)
+	defer delete(spans)
+	copy(spans, spans_in)
+	for i in 0 ..< len(spans) {
+		for j in i + 1 ..< len(spans) {
+			if spans[j][0] < spans[i][0] {
+				spans[i], spans[j] = spans[j], spans[i]
+			}
+		}
+	}
+	total: i64 = 0
+	pos := HEADER_BYTES
+	for span in spans {
+		if span[0] > pos {
+			total += zero_run(data, pos, span[0])
+		}
+		if span[1] > pos {
+			pos = span[1]
+		}
+	}
+	if pos < len(data) {
+		total += zero_run(data, pos, len(data))
+	}
+	return total
+}
+
+// zero_run is the length of the run when every byte in it is zero, and zero
+// otherwise.
+zero_run :: proc(data: []u8, from, to: int) -> i64 {
+	if to <= from {
+		return 0
+	}
+	for i in from ..< to {
+		if data[i] != 0 {
+			return 0
+		}
+	}
+	return i64(to - from)
 }
 
 audit_lumps_destroy :: proc(a: ^Lump_Audit) {
@@ -138,12 +196,15 @@ audit_lumps_text :: proc(a: ^Lump_Audit) -> string {
 	b := strings.builder_make()
 	fmt.sbprintf(&b, "file bytes:      %12d\n", a.file_bytes)
 	fmt.sbprintf(&b, "interpreted:     %12d (%.1f%%)\n", a.interpreted, percent(a.interpreted, a.file_bytes))
-	// The header (ident, version and the 64 lump descriptors) is parsed by read,
-	// so it is credited on its own line.
-	header: i64 = 8 + HEADER_LUMPS * 16
-	credited := a.interpreted + header
+	// The header is the tag, the version, the 64 lump descriptors and the map
+	// revision word that follows them, which the reader of this format handles.
+	header: i64 = HEADER_BYTES
+	credited := a.interpreted + header + a.padding
 	if credited > a.file_bytes {
 		credited = a.file_bytes
+	}
+	if a.padding > 0 {
+		fmt.sbprintf(&b, "alignment:       %12d (zero bytes between lumps)\n", a.padding)
 	}
 	fmt.sbprintf(&b, "credited:        %12d (%.1f%%)\n", credited, percent(credited, a.file_bytes))
 	fmt.sbprintf(&b, "uninterpreted:   %12d\n", a.file_bytes - credited)
