@@ -205,6 +205,14 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 				detail = style_d.items[0].message
 			}
 			delete(style_d.items)
+		case "GuidCache":
+			_, cache_d := read_guid_cache(pkg, index, allocator)
+			if !diag.has_errors(&cache_d) {
+				interpreted = i64(e.serial_size)
+			} else if len(cache_d.items) > 0 && detail == "" {
+				detail = cache_d.items[0].message
+			}
+			delete(cache_d.items)
 		case "RB_BodySetup":
 			phys, phys_d := read_precached_phys_data(pkg, index)
 			if !diag.has_errors(&phys_d) {
