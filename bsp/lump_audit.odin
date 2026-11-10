@@ -90,6 +90,10 @@ Lump_Audit :: struct {
 	rows:          []Lump_Row,
 	interpreted:   i64,
 	uninterpreted: i64,
+	// file_bytes is the real length of the map; the lumps never cover it whole
+	// (there is a tail after the last lump), so the coverage is measured against
+	// this and not against the lump sum.
+	file_bytes:    i64,
 }
 
 // audit_lumps reports one row per non-empty lump. The caller owns the result.
@@ -98,6 +102,7 @@ audit_lumps :: proc(data: []u8) -> Lump_Audit {
 	if len(data) < 8 + HEADER_LUMPS * 16 {
 		return result
 	}
+	result.file_bytes = i64(len(data))
 	rows := make([dynamic]Lump_Row, 0, HEADER_LUMPS, context.allocator)
 	for i in 0 ..< HEADER_LUMPS {
 		base := 8 + i * 16
@@ -131,14 +136,17 @@ audit_lumps_destroy :: proc(a: ^Lump_Audit) {
 
 audit_lumps_text :: proc(a: ^Lump_Audit) -> string {
 	b := strings.builder_make()
-	fmt.sbprintf(&b, "file bytes:      %12d\n", a.interpreted + a.uninterpreted)
-	fmt.sbprintf(&b, "interpreted:     %12d (%.1f%%)\n", a.interpreted, percent(a.interpreted, a.interpreted + a.uninterpreted))
+	fmt.sbprintf(&b, "file bytes:      %12d\n", a.file_bytes)
+	fmt.sbprintf(&b, "interpreted:     %12d (%.1f%%)\n", a.interpreted, percent(a.interpreted, a.file_bytes))
 	// The header (ident, version and the 64 lump descriptors) is parsed by read,
 	// so it is credited on its own line.
 	header: i64 = 8 + HEADER_LUMPS * 16
 	credited := a.interpreted + header
-	fmt.sbprintf(&b, "credited:        %12d (%.1f%%)\n", credited, percent(credited, a.interpreted + a.uninterpreted))
-	fmt.sbprintf(&b, "uninterpreted:   %12d\n", a.uninterpreted)
+	if credited > a.file_bytes {
+		credited = a.file_bytes
+	}
+	fmt.sbprintf(&b, "credited:        %12d (%.1f%%)\n", credited, percent(credited, a.file_bytes))
+	fmt.sbprintf(&b, "uninterpreted:   %12d\n", a.file_bytes - credited)
 	for row in a.rows {
 		status := "interpreted"
 		if !row.interpreted {
@@ -245,6 +253,8 @@ lump_reason :: proc(data: []u8, index, offset, length: int) -> string {
 		return vectors_reason(data, offset, length)
 	case LUMP_LEAF_WATER_DATA:
 		return leaf_water_reason(data, offset, length)
+	case LUMP_WORLDLIGHTS, LUMP_WORLDLIGHTS_HDR:
+		return world_lights_reason(data, index, offset, length)
 	case LUMP_LEAF_MIN_DIST_TO_WATER:
 		return leaf_water_distance_reason(data, offset, length)
 	case LUMP_LIGHTMAP_PAGES, LUMP_LIGHTMAP_PAGE_INFOS:
@@ -642,6 +652,56 @@ sized_lump_reason :: proc(data: []u8, index, offset, length: int) -> string {
 		return fmt.aprintf("size is not a multiple of %d", stride)
 	}
 	return ""
+}
+
+// world_lights_reason validates the world light array. CS:GO stores a hundred
+// byte dworldlight_t (origin, intensity, normal, shadow cast offset, then the
+// scalar block) while older maps store eighty eight bytes, without the shadow
+// cast offset. The record is accepted only when every light passes the checks:
+// finite vectors, a cluster inside the leaf lump, a type from zero to six, a
+// style below the light style limit and a texinfo inside the texinfo lump.
+world_lights_reason :: proc(data: []u8, index, offset, length: int) -> string {
+	leaves := leaf_count(data)
+	texinfo := lump_int(data, LUMP_TEXINFO, 4) / 72
+	for stride in ([?]int{100, 88}) {
+		if length % stride != 0 {
+			continue
+		}
+		base := stride - 52
+		valid := true
+		for i in 0 ..< length / stride {
+			record := offset + i * stride
+			for k in 0 ..< 9 {
+				value := read_f32(data, record + k * 4)
+				if !(value == value) || value > 1e9 || value < -1e9 {
+					valid = false
+				}
+			}
+			cluster := int(read_i32(data, record + base))
+			kind := int(read_i32(data, record + base + 4))
+			style := int(read_i32(data, record + base + 8))
+			lump := int(read_i32(data, record + base + 44))
+			if kind < 0 || kind > 6 || style < 0 || style >= 64 {
+				valid = false
+			}
+			if cluster < -1 || cluster >= 1_000_000 {
+				valid = false
+			}
+			if leaves > 0 && cluster >= leaves {
+				valid = false
+			}
+			if lump < -1 || (lump >= 0 && texinfo > 0 && lump >= texinfo) {
+				valid = false
+			}
+			if !valid {
+				break
+			}
+		}
+		if valid {
+			return ""
+		}
+	}
+	return "size does not divide by 100 or 88, or a light record is out of range"
 }
 
 // leaf_stride returns the size of one dleaf_t for this map version: Source 2006
