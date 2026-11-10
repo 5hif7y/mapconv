@@ -87,14 +87,11 @@ read_world :: proc(
 			view.cam_position[k] = value
 		}
 		for k in 0 ..< 3 {
-			angle := read_i32(&r)
-			// A rotator is an angle in 1/65536 turns, so a sane value stays well
-			// inside one turn either way.
-			if angle > 1 << 24 || angle < -(1 << 24) {
-				diag.err(&d, "ue3.bad-world", fmt.aprintf("editor view %d holds an implausible rotation", i))
-				return
-			}
-			view.cam_rotation[k] = angle
+			// A rotator component is a raw angle word; the layout is verified by
+			// the body length and the references, so the value is kept as read
+			// instead of being filtered (some cooked maps store editor state that
+			// is not a proper rotation).
+			view.cam_rotation[k] = read_i32(&r)
 		}
 		view.ortho_zoom = read_f32(&r)
 		if !(view.ortho_zoom == view.ortho_zoom) || math.abs(view.ortho_zoom) > 1e12 {

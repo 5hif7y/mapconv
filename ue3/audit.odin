@@ -176,6 +176,14 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 				interpreted = i64(e.serial_size)
 			}
 			delete(struct_d.items)
+		case "PointLightComponent", "SpotLightComponent", "DirectionalLightComponent", "SkyLightComponent", "BeastAreaLightComponent", "LightComponent":
+			_, light_d := read_light_component_tail(pkg, index, allocator)
+			if !diag.has_errors(&light_d) {
+				interpreted = i64(e.serial_size)
+			} else if len(light_d.items) > 0 {
+				detail = light_d.items[0].message
+			}
+			delete(light_d.items)
 		case "TerrainComponent":
 			terrain, terrain_d := read_terrain_component(pkg, index, allocator)
 			if !diag.has_errors(&terrain_d) {
@@ -188,6 +196,8 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 			_, world_d := read_world(pkg, index, allocator)
 			if !diag.has_errors(&world_d) {
 				interpreted = i64(e.serial_size)
+			} else if len(world_d.items) > 0 {
+				detail = world_d.items[0].message
 			}
 			delete(world_d.items)
 		case "Font":
