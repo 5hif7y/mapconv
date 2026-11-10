@@ -1068,13 +1068,23 @@ leaf_water_reason :: proc(data: []u8, offset, length: int) -> string {
 // then the blobs, in order. Every size is consumed, so the lump closes exactly and
 // the count cross-checks against the displacement lump.
 phys_disp_reason :: proc(data: []u8, offset, length: int) -> string {
-	if length < 4 {
+	// The lump is a sixteen bit count and, when it is not zero, a size per
+	// displacement followed by the blobs. A map without displacements writes the
+	// count alone: two zero bytes, which is what the eight small maps of the corpus
+	// carry.
+	if length < 2 {
 		return "shorter than the displacement count"
 	}
 	count := int(read_u16(data, offset))
 	disps := lump_length(data, LUMP_DISPINFO) / 176
 	if count != disps {
 		return "count does not match the displacement info lump"
+	}
+	if count == 0 {
+		if length != 2 {
+			return "an empty size table has trailing bytes"
+		}
+		return ""
 	}
 	blobs := 2 + count * 2
 	if blobs > length {
