@@ -198,6 +198,8 @@ lump_reason :: proc(data: []u8, index, offset, length: int) -> string {
 			return "size is not a multiple of 176"
 		}
 		return ""
+	case LUMP_PRIMITIVES:
+		return primitives_reason(data, offset, length)
 	case LUMP_DISPTRIS:
 		if length % 16 != 0 {
 			return "size is not a multiple of 16"
@@ -644,4 +646,34 @@ phys_disp_reason :: proc(data: []u8, offset, length: int) -> string {
 
 lump_length :: proc(data: []u8, index: int) -> int {
 	return lump_int(data, index, 4)
+}
+
+// primitives_reason: ten byte records of {u16 type (always 0), u16 first,
+// u16 count, u16 pad, u16 pad}. The runs tile the primitive index lump exactly:
+// each record starts where the previous one ended and the total equals the index
+// count. Records come in pairs (a vertex run then an index run) when the file has
+// an even number of them, which is why some files also divide by twenty.
+primitives_reason :: proc(data: []u8, offset, length: int) -> string {
+	if length % 10 != 0 {
+		return "size is not a multiple of 10"
+	}
+	indices := lump_int(data, LUMP_PRIMINDICES, 4) / 2
+	expected := 0
+	for i in 0 ..< length / 10 {
+		base := offset + i * 10
+		kind := int(read_u16(data, base))
+		first := int(read_u16(data, base + 2))
+		count := int(read_u16(data, base + 4))
+		if kind != 0 {
+			return "primitive type field is not zero"
+		}
+		if first != expected {
+			return "primitive run does not continue the previous one"
+		}
+		expected = first + count
+	}
+	if expected != indices {
+		return "primitive runs do not tile the index lump"
+	}
+	return ""
 }
