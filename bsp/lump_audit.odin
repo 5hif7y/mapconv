@@ -253,6 +253,8 @@ lump_reason :: proc(data: []u8, index, offset, length: int) -> string {
 		return vectors_reason(data, offset, length)
 	case LUMP_LEAF_WATER_DATA:
 		return leaf_water_reason(data, offset, length)
+	case LUMP_DISP_LIGHTMAP_SAMPLE_POSITIONS:
+		return disp_sample_positions_reason(data, offset, length)
 	case LUMP_WORLDLIGHTS, LUMP_WORLDLIGHTS_HDR:
 		return world_lights_reason(data, index, offset, length)
 	case LUMP_LEAF_MIN_DIST_TO_WATER:
@@ -650,6 +652,80 @@ sized_lump_reason :: proc(data: []u8, index, offset, length: int) -> string {
 	}
 	if stride <= 0 || length % stride != 0 {
 		return fmt.aprintf("size is not a multiple of %d", stride)
+	}
+	return ""
+}
+
+// disp_sample_positions_reason validates the displacement lightmap sample
+// positions. The lump is not a record array: engine.dll (x64, function
+// 0x18000c0600) walks it as a byte stream where each lightmap sample is an
+// interpolation of three vertices, written as one vertex byte followed by three
+// weight bytes, and a vertex byte of 0xFF escapes to 255 plus the next byte, so
+// the step is five bytes instead of four.
+//
+// The start of each surface is m_iLightmapSamplePositionStart of its
+// displacement info (offset 44 of the 176 byte record) and the sample count is
+// (sizeX + 1) * (sizeY + 1) of the face lightmap. Measured on the corpus: the
+// runs tile the lump exactly, without gaps or overlaps, in all 72 maps that carry
+// it, which is the check this reader applies.
+disp_sample_positions_reason :: proc(data: []u8, offset, length: int) -> string {
+	faces_offset := lump_int(data, LUMP_FACES, 0)
+	faces_length := lump_int(data, LUMP_FACES, 4)
+	info_offset := lump_int(data, LUMP_DISPINFO, 0)
+	info_length := lump_int(data, LUMP_DISPINFO, 4)
+	if faces_length % 56 != 0 || info_length % 176 != 0 {
+		return "the face or displacement lump is not whole"
+	}
+	covered := make([]bool, length)
+	defer delete(covered)
+	any := false
+	for face in 0 ..< faces_length / 56 {
+		base := faces_offset + face * 56
+		info := int(read_i16(data, base + 12))
+		if info < 0 {
+			continue
+		}
+		if info >= info_length / 176 {
+			return "a face points past the displacement lump"
+		}
+		size_x := int(read_i32(data, base + 36))
+		size_y := int(read_i32(data, base + 40))
+		if size_x < 0 || size_y < 0 || size_x > 255 || size_y > 255 {
+			continue
+		}
+		start := int(read_i32(data, info_offset + info * 176 + 44))
+		if start < 0 || start >= length {
+			return "a sample run starts outside the lump"
+		}
+		pos := start
+		for _ in 0 ..< (size_x + 1) * (size_y + 1) {
+			if pos >= length {
+				return "a sample run leaves the lump"
+			}
+			step := 4
+			if data[offset + pos] == 0xff {
+				step = 5
+			}
+			for k in 0 ..< step {
+				if pos + k >= length {
+					return "a sample leaves the lump"
+				}
+				if covered[pos + k] {
+					return "two surfaces claim the same sample"
+				}
+				covered[pos + k] = true
+			}
+			pos += step
+		}
+		any = true
+	}
+	if !any {
+		return "no displacement surface references the lump"
+	}
+	for value in covered {
+		if !value {
+			return "some samples are not referenced by any surface"
+		}
 	}
 	return ""
 }
