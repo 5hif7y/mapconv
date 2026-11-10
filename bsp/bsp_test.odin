@@ -411,3 +411,58 @@ test_lightmap_blocks_may_not_overlap :: proc(t: ^testing.T) {
 	defer delete(past)
 	testing.expect_value(t, lighting_reason(past, 8, 2048, 256), "lightmap sample block past the lump")
 }
+
+// A map with a leaf lump (two leaves), the ambient index for them and the ambient
+// samples the index names: three samples for the first leaf and two for the second.
+build_ambient_map :: proc(first_count: u16, second_first: u16, ambient_samples: int) -> []u8 {
+	data := make([]u8, 8192)
+	store_i32(data, 0, 0x50534256) // VBSP
+	store_i32(data, 4, 20)         // version: 32 byte leaves
+	leafs_offset := 1024
+	index_offset := 2048
+	ambient_offset := 3072
+	// Lump 10 (leafs): two leaves of 32 bytes.
+	store_i32(data, 8 + 10 * 16, i32(leafs_offset))
+	store_i32(data, 8 + 10 * 16 + 4, 64)
+	// Lump 52 (leafAmbientIndex): two records of {u16 count, u16 first}.
+	store_i32(data, 8 + 52 * 16, i32(index_offset))
+	store_i32(data, 8 + 52 * 16 + 4, 8)
+	store_u16_bytes(data, index_offset, first_count)
+	store_u16_bytes(data, index_offset + 2, 0)
+	store_u16_bytes(data, index_offset + 4, 2)
+	store_u16_bytes(data, index_offset + 6, second_first)
+	// Lump 56 (leafAmbientLighting): 28 bytes per sample, pad byte zero.
+	store_i32(data, 8 + 56 * 16, i32(ambient_offset))
+	store_i32(data, 8 + 56 * 16 + 4, i32(ambient_samples * 28))
+	return data
+}
+
+store_u16_bytes :: proc(data: []u8, offset: int, value: u16) {
+	data[offset] = u8(value & 0xff)
+	data[offset + 1] = u8(value >> 8)
+}
+
+@(test)
+test_leaf_ambient_index_tiles_the_sample_lump :: proc(t: ^testing.T) {
+	data := build_ambient_map(3, 3, 5)
+	defer delete(data)
+	testing.expect_value(t, leaf_ambient_index_reason(data, 52, 2048, 8), "")
+	testing.expect_value(t, leaf_ambient_reason(data, 56, 3072, 5 * 28), "")
+
+	// One sample too many: the index and the lump disagree about how much the
+	// leaves own.
+	short := build_ambient_map(3, 3, 4)
+	defer delete(short)
+	testing.expect(t, leaf_ambient_reason(short, 56, 3072, 4 * 28) != "", "a short sample lump has to be reported")
+
+	// Both leaves claiming the same samples.
+	clash := build_ambient_map(3, 0, 5)
+	defer delete(clash)
+	testing.expect(t, leaf_ambient_index_reason(clash, 52, 2048, 8) != "", "overlapping leaves have to be reported")
+
+	// A leaf lump that does not divide by the stride cannot be read at all.
+	odd := build_ambient_map(3, 3, 5)
+	defer delete(odd)
+	store_i32(odd, 8 + 10 * 16 + 4, 60)
+	testing.expect_value(t, leaf_ambient_index_reason(odd, 52, 2048, 8), "no leaf lump divisible by its stride to count the index against")
+}

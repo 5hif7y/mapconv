@@ -64,8 +64,8 @@ LUMP_NAMES := [HEADER_LUMPS]string {
 	"dispTris",
 	"physCollideSurface",
 	"waterOverlays",
-	"lightmapPages",
-	"lightmapPageInfos",
+	"leafAmbientIndexHDR",
+	"leafAmbientIndex",
 	"lightingHDR",
 	"worldLightsHDR",
 	"leafAmbientLightingHDR",
@@ -252,7 +252,14 @@ percent :: proc(part: i64, whole: i64) -> f64 {
 // lump_reason returns "" when the lump is fully interpreted, or a short reason.
 lump_reason :: proc(data: []u8, index, offset, length: int) -> string {
 	switch index {
-	case LUMP_ENTITIES, LUMP_PLANES, LUMP_TEXDATA, LUMP_VERTEXES, LUMP_NODES, LUMP_TEXINFO, LUMP_FACES, LUMP_LEAFS, LUMP_EDGES, LUMP_SURFEDGES, LUMP_MODELS, LUMP_LEAFBRUSHES, LUMP_BRUSHES, LUMP_BRUSHSIDES, LUMP_TEXDATA_STRING_DATA, LUMP_TEXDATA_STRING_TABLE:
+	case LUMP_LEAFS:
+		// The loader divides the lump by the leaf stride before anything else and
+		// refuses a remainder, so a leaf lump that does not divide cannot be read.
+		if leaf_count(data) == 0 {
+			return "size is not a whole number of leaves"
+		}
+		return ""
+	case LUMP_ENTITIES, LUMP_PLANES, LUMP_TEXDATA, LUMP_VERTEXES, LUMP_NODES, LUMP_TEXINFO, LUMP_FACES, LUMP_EDGES, LUMP_SURFEDGES, LUMP_MODELS, LUMP_LEAFBRUSHES, LUMP_BRUSHES, LUMP_BRUSHSIDES, LUMP_TEXDATA_STRING_DATA, LUMP_TEXDATA_STRING_TABLE:
 		return sized_lump_reason(data, index, offset, length)
 	case LUMP_LIGHTING, LUMP_LIGHTING_HDR:
 		return lighting_reason(data, index, offset, length)
@@ -311,7 +318,7 @@ lump_reason :: proc(data: []u8, index, offset, length: int) -> string {
 	case LUMP_DISP_LIGHTMAP_ALPHAS:
 		return ""
 	case LUMP_LEAF_AMBIENT, LUMP_LEAF_AMBIENT_HDR:
-		return leaf_ambient_reason(data, offset, length)
+		return leaf_ambient_reason(data, index, offset, length)
 	case LUMP_AREAS:
 		return areas_reason(data, offset, length)
 	case LUMP_AREA_PORTALS:
@@ -332,8 +339,8 @@ lump_reason :: proc(data: []u8, index, offset, length: int) -> string {
 		return world_lights_reason(data, index, offset, length)
 	case LUMP_LEAF_MIN_DIST_TO_WATER:
 		return leaf_water_distance_reason(data, offset, length)
-	case LUMP_LIGHTMAP_PAGES, LUMP_LIGHTMAP_PAGE_INFOS:
-		return leaf_index_lump_reason(data, index, offset, length)
+	case LUMP_LEAF_AMBIENT_INDEX_HDR, LUMP_LEAF_AMBIENT_INDEX:
+		return leaf_ambient_index_reason(data, index, offset, length)
 	case LUMP_OVERLAY_FADES:
 		return overlay_fade_reason(data, offset, length)
 	case LUMP_MAP_FLAGS:
@@ -561,23 +568,37 @@ index_reason :: proc(data: []u8, index, offset, length: int) -> string {
 
 // leaf_ambient_reason validates displacement-free leaf ambient cubes: a 24 byte
 // compressed cube (six ColourRGBExp32) plus x, y and z bytes and a zero pad.
-leaf_ambient_reason :: proc(data: []u8, offset, length: int) -> string {
-	// Current maps store a 24 byte compressed cube plus x, y, z and a zero pad;
-	// the older maps in the corpus stop after the cube.
-	if length % 28 == 0 {
-		valid := true
+leaf_ambient_reason :: proc(data: []u8, index, offset, length: int) -> string {
+	// The index says how many ambient samples each leaf owns; adding those counts
+	// gives the sample count the lump must hold, which is a cross count and not a
+	// divisibility test. Current maps store a 24 byte compressed cube plus x, y, z
+	// and a zero pad; the older maps in the corpus stop after the cube.
+	index_lump := LUMP_LEAF_AMBIENT_INDEX
+	if index == LUMP_LEAF_AMBIENT_HDR {
+		index_lump = LUMP_LEAF_AMBIENT_INDEX_HDR
+	}
+	index_length := lump_int(data, index_lump, 4)
+	expected := -1
+	if index_length > 0 && index_length % 4 == 0 {
+		total := 0
+		for i in 0 ..< index_length / 4 {
+			total += int(pak_u16(data, lump_int(data, index_lump, 0) + i * 4))
+		}
+		expected = total
+	}
+	if length % 28 == 0 && (expected < 0 || expected * 28 == length) {
 		for i in 0 ..< length / 28 {
 			if data[offset + i * 28 + 27] != 0 {
-				valid = false
-				break
+				return "an ambient sample has a non zero pad byte"
 			}
 		}
-		if valid {
-			return ""
-		}
-	}
-	if length % 24 == 0 {
 		return ""
+	}
+	if length % 24 == 0 && (expected < 0 || expected * 24 == length) {
+		return ""
+	}
+	if expected >= 0 {
+		return fmt.aprintf("the leaf index names %d samples of 28 or 24 bytes and the lump holds %d", expected, length)
 	}
 	return "size is not a multiple of 24 or 28"
 }
@@ -1035,13 +1056,61 @@ leaf_water_distance_reason :: proc(data: []u8, offset, length: int) -> string {
 
 // leaf_index_lump_reason validates the per-leaf lightmap page arrays: four bytes
 // per leaf, in leaf order.
-leaf_index_lump_reason :: proc(data: []u8, index, offset, length: int) -> string {
+// leaf_ambient_index_reason reads the ambient cube index: four bytes per leaf,
+// a count and the first sample, and the runs of samples those leaves name have to
+// tile the ambient lump (55 for the HDR index, 56 for the LDR one) exactly. The
+// engine pairs them the same way: Mod_LoadLeafs hands lumps 55/51 and 56/52 to one
+// loader, which only copies the index when it holds a sample count.
+leaf_ambient_index_reason :: proc(data: []u8, index, offset, length: int) -> string {
 	leaves := leaf_count(data)
 	if leaves == 0 {
-		return "no divisible leaf lump to check the page array against"
+		return "no leaf lump divisible by its stride to count the index against"
 	}
 	if length != leaves * 4 {
 		return "size is not four bytes per leaf"
+	}
+	samples_lump := LUMP_LEAF_AMBIENT
+	if index == LUMP_LEAF_AMBIENT_INDEX_HDR {
+		samples_lump = LUMP_LEAF_AMBIENT_HDR
+	}
+	samples_length := lump_int(data, samples_lump, 4)
+	spans := make([dynamic][2]int, 0, leaves, context.allocator)
+	defer delete(spans)
+	for i in 0..<leaves {
+		count := int(pak_u16(data, offset + i * 4))
+		first := int(pak_u16(data, offset + i * 4 + 2))
+		if count == 0 {
+			continue
+		}
+		append(&spans, {first, first + count})
+	}
+	if samples_length == 0 {
+		if len(spans) > 0 {
+			return "the index names ambient samples the sample lump does not hold"
+		}
+		return ""
+	}
+	stride := 28
+	if samples_length % 28 != 0 {
+		if samples_length % 24 != 0 {
+			return "ambient sample lump is a multiple of neither 28 nor 24"
+		}
+		stride = 24
+	}
+	samples := samples_length / stride
+	slice.sort_by(spans[:], proc(a, b: [2]int) -> bool { return a[0] < b[0] })
+	position := 0
+	for span in spans {
+		if span[0] != position {
+			if span[0] < position {
+				return "two leaves name the same ambient sample"
+			}
+			return fmt.aprintf("%d ambient samples belong to no leaf", span[0] - position)
+		}
+		position = span[1]
+	}
+	if position != samples {
+		return fmt.aprintf("the leaf index ends at sample %d of %d", position, samples)
 	}
 	return ""
 }
