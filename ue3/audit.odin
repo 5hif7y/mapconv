@@ -205,6 +205,15 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 				detail = style_d.items[0].message
 			}
 			delete(style_d.items)
+		case "RB_BodySetup":
+			phys, phys_d := read_precached_phys_data(pkg, index)
+			if !diag.has_errors(&phys_d) {
+				interpreted = i64(e.serial_size)
+			} else if len(phys_d.items) > 0 && detail == "" {
+				detail = phys_d.items[0].message
+			}
+			precached_data_destroy(&phys)
+			delete(phys_d.items)
 		case "ShadowMap1D":
 			_, shadow_d := read_shadow_map_1d(pkg, index, allocator)
 			if !diag.has_errors(&shadow_d) {
@@ -258,12 +267,6 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 				interpreted = i64(e.serial_size)
 			}
 			delete(pcd_d.items)
-		case "RB_BodySetup":
-			_, setup_d := read_body_setup(pkg, index, allocator)
-			if !diag.has_errors(&setup_d) {
-				interpreted = i64(e.serial_size)
-			}
-			delete(setup_d.items)
 		case "ShaderCache":
 			_, scache_d := read_shader_cache(pkg, index, allocator)
 			if !diag.has_errors(&scache_d) {
