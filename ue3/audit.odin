@@ -239,7 +239,7 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 			_ = entries
 			delete(prefab_d.items)
 		case "UISkin":
-			skin_d := read_ui_skin(pkg, index, allocator)
+			_, skin_d := read_ui_skin(pkg, index, allocator)
 			if !diag.has_errors(&skin_d) {
 				interpreted = i64(e.serial_size)
 			} else if len(skin_d.items) > 0 && detail == "" {

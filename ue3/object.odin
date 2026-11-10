@@ -717,13 +717,25 @@ read_prefab_instance :: proc(
 	return
 }
 
-// UUISkin has no serializer in the tree; its measured tail is one zero word.
-// Anything else is reported instead of credited.
+// UUISkin has no serializer in the tree, so its payload is the tag stream plus a
+// structure whose frame is measured and whose last field is not identified.
+//
+// The tail is a count and that many records of twenty bytes: two names and one
+// four byte value. In DefaultUISkin the records read as a cursor name, the style it
+// resolves to and a number that falls one past the export count of the package
+// (495, 497 and 496 with 497 exports), so it is neither an export index nor a net
+// index; the reader leaves it untouched and says so. The frame itself is checked
+// against the name table for both names in every record.
+UI_Skin :: struct {
+	records:    int,
+	end_offset: int,
+}
+
 read_ui_skin :: proc(
 	pkg: ^Package,
 	export_index: int,
 	allocator := context.allocator,
-) -> (d: diag.Diagnostics) {
+) -> (skin: UI_Skin, d: diag.Diagnostics) {
 	d = diag.init()
 	if export_index < 0 || export_index >= len(pkg.exports) {
 		diag.err(&d, "ue3.bad-export", fmt.aprintf("export index %d out of range", export_index))
@@ -735,18 +747,33 @@ read_ui_skin :: proc(
 		return
 	}
 	delete(head_d.items)
-	if head.end_offset - head.body_offset != 4 {
-		diag.err(
-			&d,
-			"ue3.unexpected-ui-skin-tail",
-			fmt.aprintf("%d trailing bytes instead of one zero word", head.end_offset - head.body_offset),
-		)
+	r := Reader{data = pkg.data, pos = head.body_offset, limit = head.end_offset}
+	count := read_i32(&r)
+	if r.failed || count < 0 || i64(count) * 20 != i64(head.end_offset - r.pos) {
+		diag.err(&d, "ue3.bad-ui-skin", fmt.aprintf("a skin of %d records cannot hold the tail", count))
 		return
 	}
-	value := read_i32(&Reader{data = pkg.data, pos = head.body_offset, limit = head.end_offset})
-	if value != 0 {
-		diag.err(&d, "ue3.unexpected-ui-skin-tail", fmt.aprintf("the trailing word is %d", value))
-		return
+	for _ in 0 ..< count {
+		for field in 0 ..< 2 {
+			name := read_name_ref(&r)
+			if r.failed {
+				diag.err(&d, "ue3.truncated", r.message)
+				return
+			}
+			if name.index < 0 || int(name.index) >= len(pkg.names) {
+				diag.err(&d, "ue3.bad-ui-skin", fmt.aprintf("field %d names %d, outside the name table", field, name.index))
+				return
+			}
+		}
+		_ = read_i32(&r) // unidentified value, documented above
+		if r.failed {
+			diag.err(&d, "ue3.truncated", r.message)
+			return
+		}
 	}
+	skin.records = int(count)
+	skin.end_offset = r.pos
 	return
 }
+
+
