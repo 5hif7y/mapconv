@@ -184,6 +184,14 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 				detail = fractured_d.items[0].message
 			}
 			delete(fractured_d.items)
+		case "UIStyle":
+			_, style_d := read_ui_style(pkg, index, allocator)
+			if !diag.has_errors(&style_d) {
+				interpreted = i64(e.serial_size)
+			} else if len(style_d.items) > 0 {
+				detail = style_d.items[0].message
+			}
+			delete(style_d.items)
 		case "ShadowMap1D":
 			_, shadow_d := read_shadow_map_1d(pkg, index, allocator)
 			if !diag.has_errors(&shadow_d) {
