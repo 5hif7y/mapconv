@@ -9,3 +9,6 @@
 *.srctrldb-wal
 *.srctrlbm
 *.srctrlprj
+*.exe
+*.pdb
+__pycache__/
