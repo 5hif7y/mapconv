@@ -272,6 +272,13 @@ run_inspect :: proc(args: Args, text: string) {
 		print_diagnostics(&diagnostics, args.quiet, args.report)
 		os.exit(1)
 	}
+	if format == .Source_BSP {
+		report, ok := bsp.materials_of(transmute([]u8)text, filepath.stem(args.input))
+		if ok {
+			fmt.println(bsp.material_report_text(report))
+			bsp.material_report_destroy(&report)
+		}
+	}
 	fmt.print(convert.inspect_document(&doc))
 	fmt.printfln("diagnostics: %s", diag.summary(&diagnostics))
 	if !args.quiet {
@@ -352,6 +359,11 @@ run_extract_bsp :: proc(args: Args, text: string) {
 		}
 	}
 	fmt.printfln("extracted %d of %d pakfile entr(ies), %d bytes (%d skipped)", written, len(entries), bytes, skipped)
+	report, report_ok := bsp.materials_of(data, filepath.stem(args.input))
+	if report_ok {
+		fmt.println(bsp.material_report_text(report))
+		bsp.material_report_destroy(&report)
+	}
 	print_diagnostics(&diagnostics, args.quiet, args.report)
 }
 
