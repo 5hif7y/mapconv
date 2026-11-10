@@ -168,11 +168,19 @@ skip_expression :: proc(r: ^Reader, pkg: ^Package, type_name: string) -> bool {
 	case "FMaterialUniformExpressionTime", "FMaterialUniformExpressionRealTime":
 		params = 0
 	case "FMaterialUniformExpressionTexture":
+		// FMaterialUniformExpressionTexture::Serialize (MaterialShared.cpp:2770)
+		// writes either the legacy texture reference or the texture index, never
+		// both: four bytes either way.
 		params = 4
-	case "FMaterialUniformExpressionTextureParameter",
-	     "FMaterialUniformExpressionFlipBookTextureParameter":
-		// The flip book variant adds nothing to the texture parameter layout.
+	case "FMaterialUniformExpressionTextureParameter":
+		// The parameter name, then the texture base class.
 		params = 12
+	case "FMaterialUniformExpressionFlipBookTextureParameter":
+		// MaterialShared.cpp:3081 derives straight from the texture base and adds
+		// no member of its own, so it writes the four bytes of the base and nothing
+		// else. Reading twelve here desynchronised the stream four bytes ahead and
+		// the next type name landed inside an editor class name.
+		params = 4
 	case "FMaterialUniformExpressionScalarParameter":
 		params = 12
 	case "FMaterialUniformExpressionVectorParameter":
