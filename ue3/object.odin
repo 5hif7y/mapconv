@@ -85,6 +85,40 @@ is_none_name :: proc(pkg: ^Package, ref: Name_Ref) -> bool {
 	return ref.index >= 0 && int(ref.index) < len(pkg.names) && ref.number == 0 && pkg.names[ref.index].text == "None"
 }
 
+// UObjectRedirector::Serialize (Core/Src/UnObjectRedirector.cpp:42) writes the
+// object it points at after the tag stream, and nothing else.
+read_object_redirector :: proc(
+	pkg: ^Package,
+	export_index: int,
+	allocator := context.allocator,
+) -> (d: diag.Diagnostics) {
+	d = diag.init()
+	if export_index < 0 || export_index >= len(pkg.exports) {
+		diag.err(&d, "ue3.bad-export", fmt.aprintf("export index %d out of range", export_index))
+		return
+	}
+	head, head_d := read_object_head(pkg, pkg.exports[export_index], allocator, export_index)
+	if diag.has_errors(&head_d) {
+		d = head_d
+		return
+	}
+	delete(head_d.items)
+	if head.end_offset - head.body_offset != 4 {
+		diag.err(
+			&d,
+			"ue3.bad-redirector",
+			fmt.aprintf("%d trailing bytes instead of the destination object", head.end_offset - head.body_offset),
+		)
+		return
+	}
+	destination := read_i32(&Reader{data = pkg.data, pos = head.body_offset, limit = head.end_offset})
+	if !valid_object_reference(pkg, destination) {
+		diag.err(&d, "ue3.bad-redirector", fmt.aprintf("%d is not an object reference", destination))
+		return
+	}
+	return
+}
+
 // read_object_head reads the NetIndex and the tagged-property stream of an
 // export. It bounds every read by the export's SerialSize.
 read_object_head :: proc(
@@ -566,4 +600,41 @@ tag_name_ref :: proc(pkg: ^Package, tag: Property_Tag) -> (Name_Ref, bool) {
 	}
 	r := tag_reader(pkg, tag)
 	return read_name_ref(&r), !r.failed
+}
+
+// UIDynamicFieldProvider is a Vogster class with no source in the tree. Its
+// measured body is the usual tag stream (a NetIndex and the None terminator)
+// followed by four bytes that are zero in every object of the corpus. The reader
+// takes exactly that shape: a different tail length, or a nonzero word, is
+// reported instead of credited, so a rule that only fits today cannot pass.
+read_ui_dynamic_field_provider :: proc(
+	pkg: ^Package,
+	export_index: int,
+	allocator := context.allocator,
+) -> (d: diag.Diagnostics) {
+	d = diag.init()
+	if export_index < 0 || export_index >= len(pkg.exports) {
+		diag.err(&d, "ue3.bad-export", fmt.aprintf("export index %d out of range", export_index))
+		return
+	}
+	head, head_d := read_object_head(pkg, pkg.exports[export_index], allocator, export_index)
+	if diag.has_errors(&head_d) {
+		d = head_d
+		return
+	}
+	delete(head_d.items)
+	if head.end_offset - head.body_offset != 4 {
+		diag.err(
+			&d,
+			"ue3.unexpected-field-provider-tail",
+			fmt.aprintf("%d trailing bytes instead of one zero word", head.end_offset - head.body_offset),
+		)
+		return
+	}
+	value := read_i32(&Reader{data = pkg.data, pos = head.body_offset, limit = head.end_offset})
+	if value != 0 {
+		diag.err(&d, "ue3.unexpected-field-provider-tail", fmt.aprintf("the trailing word is %d", value))
+		return
+	}
+	return
 }

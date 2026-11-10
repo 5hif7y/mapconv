@@ -325,7 +325,9 @@ read_texture_cube :: proc(
 	// The recorded offset must point inside the package, after the export header:
 	// that is where the stripped source art was written before cooking.
 	offset := read_i32(&r)
-	if r.failed || offset <= e.serial_offset || i64(offset) >= i64(len(pkg.data)) {
+	// The offset points at the end of the package when the cooker stripped the
+	// source art of the last export: it records where the data would have been.
+	if r.failed || offset <= e.serial_offset || i64(offset) > i64(len(pkg.data)) {
 		diag.err(&d, "ue3.bad-texture", fmt.aprintf("cube record offset %d is outside the export range [%d, %d)", offset, e.serial_offset, len(pkg.data)))
 		return
 	}

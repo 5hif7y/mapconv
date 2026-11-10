@@ -205,6 +205,22 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 				detail = style_d.items[0].message
 			}
 			delete(style_d.items)
+		case "UIDynamicFieldProvider":
+			field_d := read_ui_dynamic_field_provider(pkg, index, allocator)
+			if !diag.has_errors(&field_d) {
+				interpreted = i64(e.serial_size)
+			} else if len(field_d.items) > 0 && detail == "" {
+				detail = field_d.items[0].message
+			}
+			delete(field_d.items)
+		case "ObjectRedirector":
+			redir_d := read_object_redirector(pkg, index, allocator)
+			if !diag.has_errors(&redir_d) {
+				interpreted = i64(e.serial_size)
+			} else if len(redir_d.items) > 0 && detail == "" {
+				detail = redir_d.items[0].message
+			}
+			delete(redir_d.items)
 		case "SeqAct_Interp":
 			interp_d := read_seq_act_interp(pkg, index, allocator)
 			if !diag.has_errors(&interp_d) {
