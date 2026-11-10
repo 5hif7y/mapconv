@@ -172,6 +172,14 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 				interpreted = i64(e.serial_size)
 			}
 			delete(struct_d.items)
+		case "TerrainComponent":
+			terrain, terrain_d := read_terrain_component(pkg, index, allocator)
+			if !diag.has_errors(&terrain_d) {
+				// The light map block at the end of the export is still open, so
+				// only the arrays are credited.
+				interpreted = i64(e.serial_size) - i64(terrain.tail_bytes)
+			}
+			delete(terrain_d.items)
 		case "World":
 			_, world_d := read_world(pkg, index, allocator)
 			if !diag.has_errors(&world_d) {
