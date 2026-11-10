@@ -83,6 +83,16 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 		}
 		delete(head_d.items)
 
+		// UI component templates serialize the component prelude (template owner
+		// class plus net index) even though their class name does not end in
+		// "Component". The prelude and the tag stream are credited byte by byte.
+		if strings.has_prefix(class, "UIComp_") {
+			ui_head, ui_d := read_object_head_ex(pkg, e, allocator, true)
+			if !diag.has_errors(&ui_d) {
+				interpreted = i64(ui_head.body_offset - int(e.serial_offset))
+			}
+			delete(ui_d.items)
+		} else {
 		switch class {
 		case "StaticMesh":
 			mesh, mesh_d := read_static_mesh(pkg, index, allocator)
@@ -266,6 +276,7 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 				interpreted = i64(e.serial_size)
 			}
 			delete(level_d.items)
+		}
 		}
 		if interpreted > 0 {
 			row.interpreted += interpreted
