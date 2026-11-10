@@ -76,7 +76,7 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 		row.payload += i64(e.serial_size)
 		audit.payload += i64(e.serial_size)
 
-		head, head_d := read_object_head(pkg, e, allocator)
+		head, head_d := read_object_head(pkg, e, allocator, index)
 		head_failed := diag.has_errors(&head_d)
 		interpreted: i64 = 0
 		if !head_failed {
@@ -385,11 +385,15 @@ audit_dump_text :: proc(pkg: ^Package) -> string {
 		if e.serial_size <= 0 {
 			continue
 		}
-		head, head_d := read_object_head(pkg, e)
+		head, head_d := read_object_head(pkg, e, context.allocator, index)
 		class := export_class_name(pkg, e)
 		name := name_text(pkg, e.object_name)
 		if diag.has_errors(&head_d) {
-			fmt.sbprintf(&b, "EXPORT %d %s %s serial=%d size=%d class_index=%d outer=%d HEAD-FAILED\n", index, class, name, e.serial_offset, e.serial_size, e.class_index, e.outer_index)
+			why := ""
+			if len(head_d.items) > 0 {
+				why = head_d.items[0].message
+			}
+			fmt.sbprintf(&b, "EXPORT %d %s %s serial=%d size=%d class_index=%d outer=%d super=%d archetype=%d HEAD-FAILED %s\n", index, class, name, e.serial_offset, e.serial_size, e.class_index, e.outer_index, e.super_index, e.archetype_index, why)
 			delete(head_d.items)
 			continue
 		}

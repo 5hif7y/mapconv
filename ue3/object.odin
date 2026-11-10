@@ -63,6 +63,9 @@ Object_Head :: struct {
 	template_owner_class: i32,
 	has_template_owner:   bool,
 	net_index:      i32,
+	// Set when the payload is an archetype subobject: the prelude names it.
+	subobject_name: Name_Ref,
+	has_subobject:  bool,
 	tags:           []Property_Tag,
 	// Absolute file offset of the native class data (after the "None" tag).
 	body_offset:    int,
@@ -88,6 +91,7 @@ read_object_head :: proc(
 	pkg: ^Package,
 	e: Export,
 	allocator := context.allocator,
+	export_index := -1,
 ) -> (head: Object_Head, d: diag.Diagnostics) {
 	first, first_d := read_object_head_ex(pkg, e, allocator, false)
 	if !diag.has_errors(&first_d) {
@@ -99,12 +103,75 @@ read_object_head :: proc(
 	// reporting the whole export as uninterpreted; a wrong guess cannot pass
 	// because the tag stream still has to terminate inside the payload.
 	second, second_d := read_object_head_ex(pkg, e, allocator, true)
-	if diag.has_errors(&second_d) {
-		delete(second_d.items)
-		return first, first_d
+	if !diag.has_errors(&second_d) {
+		delete(first_d.items)
+		return second, second_d
 	}
-	delete(first_d.items)
-	return second, second_d
+	delete(second_d.items)
+	// The components of an archetype (the subobjects of a Default__ object) are
+	// saved with a sixteen byte prelude before their tagged defaults: a zero
+	// word, the subobject name and the export's own linker index. That index is
+	// the check: the prelude cannot be mistaken for anything else because the
+	// word has to equal the export it belongs to.
+	if export_index >= 0 {
+		third, third_d := read_object_head_subobject(pkg, e, allocator, export_index)
+		if !diag.has_errors(&third_d) {
+			delete(first_d.items)
+			return third, third_d
+		}
+		delete(third_d.items)
+	}
+	return first, first_d
+}
+
+// read_object_head_subobject reads the archetype subobject prelude and the
+// tagged defaults that follow it. The whole payload is the tag stream, so a
+// successful read ends exactly at the end of the export.
+read_object_head_subobject :: proc(
+	pkg: ^Package,
+	e: Export,
+	allocator := context.allocator,
+	export_index := -1,
+) -> (head: Object_Head, d: diag.Diagnostics) {
+	d = diag.init()
+	if e.serial_offset < 0 || e.serial_size < 0 || int(e.serial_offset) + int(e.serial_size) > len(pkg.data) {
+		diag.err(&d, "ue3.export-out-of-range", "export payload lies outside the file")
+		return
+	}
+	head.end_offset = int(e.serial_offset) + int(e.serial_size)
+	r := Reader{data = pkg.data, pos = int(e.serial_offset), limit = head.end_offset}
+	if !need(&r, 16) {
+		diag.err(&d, "ue3.truncated", r.message)
+		return
+	}
+	zero := read_i32(&r)
+	name := read_name_ref(&r)
+	own := read_i32(&r)
+	if r.failed {
+		diag.err(&d, "ue3.truncated", r.message)
+		return
+	}
+	if zero != 0 {
+		diag.err(&d, "ue3.bad-subobject-prelude", fmt.aprintf("prelude opens with %d instead of zero", zero))
+		return
+	}
+	if own != i32(export_index) {
+		diag.err(
+			&d,
+			"ue3.bad-subobject-prelude",
+			fmt.aprintf("prelude names export %d instead of %d", own, export_index),
+		)
+		return
+	}
+	tags := read_tag_stream(pkg, &r, head.end_offset, int(e.serial_size), allocator, &d)
+	if diag.has_errors(&d) {
+		return
+	}
+	head.tags = tags
+	head.subobject_name = name
+	head.has_subobject = true
+	head.body_offset = r.pos
+	return
 }
 
 // read_tag_stream consumes a tagged property stream up to its ``None`` terminator
