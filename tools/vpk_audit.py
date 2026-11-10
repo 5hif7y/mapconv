@@ -15,11 +15,16 @@ The rule was derived from the corpus: with it the tree of every directory file i
 consumed exactly, the terminator included. Names are never empty, so a leading NUL
 cannot be mistaken for the start of a name.
 
-Usage: tools/vpk_audit.py <game root> [more roots...]
+Usage: tools/vpk_audit.py [--crc] [--limit N] <game root> [more roots...]
+
+With --crc every entry is read from its archive and its CRC32 compared with the
+one the tree records. A version 2 VPK stores bytes uncompressed, so this is the
+whole content check; --limit keeps it to the first N entries per archive.
 """
 import os
 import struct
 import sys
+import zlib
 
 HEADER = 28
 RECORD = 18
@@ -33,7 +38,19 @@ def read_cstring(data, pos):
 
 def parse_tree(path):
     """Returns (entries, errors). An entry is (ext, path, name, crc, preload,
-    archive, offset, length)."""
+    archive, offset, length).
+
+    The tree is nested: an extension, then for that extension each directory, then
+    for that directory each file. An empty name closes the file list of a
+    directory, an empty directory closes the extension and an empty extension
+    closes the tree. A file without an extension is stored under a single space.
+
+    Reading the nesting as "count the leading NULs" works only while those NULs
+    happen to be contiguous, which is why the earlier rule stopped in
+    cstrike_pak_dir.vpk: after "snd" and "reslists" come an empty name and an empty
+    path, and the next bytes are the extension "lst" with the directory
+    "scripts" -- until that point every empty name had been followed by a name.
+    """
     with open(path, "rb") as handle:
         data = handle.read()
     if len(data) < HEADER:
@@ -45,36 +62,42 @@ def parse_tree(path):
     if end > len(data):
         return [], [f"{path}: tree lies outside the file"]
     entries, errors = [], []
-    ext = path_field = ""
-    first = True
-    while pos < end:
-        if first:
-            ext, pos = read_cstring(data, pos)
-            path_field, pos = read_cstring(data, pos)
-            first = False
-        else:
-            zeros = 0
-            while pos + zeros < end and data[pos + zeros] == 0 and zeros < 3:
-                zeros += 1
-            if zeros >= 3:
-                pos += zeros
-                break
-            pos += zeros
-            if zeros == 2:
-                ext, pos = read_cstring(data, pos)
-                path_field, pos = read_cstring(data, pos)
-            elif zeros == 1:
-                path_field, pos = read_cstring(data, pos)
-        name, pos = read_cstring(data, pos)
-        if pos + RECORD > end:
-            errors.append(f"{path}: entry header past the tree")
-            return entries, errors
-        crc, preload, archive, offset, length, term = struct.unpack_from("<IHHIIH", data, pos)
-        pos += RECORD
-        if term != TERMINATOR:
-            errors.append(f"{path}: entry {len(entries)} has terminator 0x{term:04X}")
-            return entries, errors
-        entries.append((ext, path_field, name, crc, preload, archive, offset, length))
+
+    def string():
+        nonlocal pos
+        if pos >= end:
+            raise EOFError("string starts past the end of the tree")
+        stop = data.find(b"\0", pos, end)
+        if stop < 0:
+            raise EOFError("unterminated string in the tree")
+        text = data[pos:stop].decode("latin1")
+        pos = stop + 1
+        return text
+
+    try:
+        ext = string()
+        while ext:
+            directory = string()
+            while directory:
+                while True:
+                    name = string()
+                    if not name:
+                        break
+                    if pos + RECORD > end:
+                        errors.append(f"{path}: entry header past the tree")
+                        return entries, errors
+                    crc, preload, archive, offset, length, term = struct.unpack_from("<IHHIIH", data, pos)
+                    pos += RECORD
+                    if term != TERMINATOR:
+                        errors.append(f"{path}: entry {len(entries)} has terminator 0x{term:04X}")
+                        return entries, errors
+                    stored_ext = "" if ext == " " else ext
+                    entries.append((stored_ext, directory, name, crc, preload, archive, offset, length))
+                directory = string()
+            ext = string()
+    except EOFError as problem:
+        errors.append(f"{path}: {problem} at entry {len(entries)}")
+        return entries, errors
     if pos != end:
         errors.append(f"{path}: tree ended {end - pos} bytes short")
     return entries, errors
@@ -87,10 +110,62 @@ def archive_path(dir_path, index):
     return f"{stem}_{index:03d}.vpk"
 
 
+def verify_crc(dir_path, entries, limit):
+    """Reads each entry from its archive and compares the CRC32 the tree records.
+    Returns (checked, bytes_read, failures)."""
+    checked = bytes_read = 0
+    failures = []
+    handles = {}
+    try:
+        for ext, directory, name, crc, _preload, archive, offset, length in entries:
+            if limit is not None and checked >= limit:
+                break
+            if archive == 0x7FFF:
+                # The payload lives inside the directory file itself.
+                source = dir_path
+                base = HEADER + struct.unpack_from("<I", open(dir_path, "rb").read(4 + 8))[0] if False else None
+            else:
+                source = archive_path(dir_path, archive)
+            handle = handles.get(source)
+            if handle is None:
+                try:
+                    handle = open(source, "rb")
+                except OSError as problem:
+                    failures.append(f"{os.path.basename(source)}: {problem}")
+                    handles[source] = False
+                    continue
+                handles[source] = handle
+            if handle is False:
+                continue
+            handle.seek(offset)
+            payload = handle.read(length)
+            if len(payload) != length:
+                failures.append(f"{ext}/{directory}/{name}: {length} bytes asked, {len(payload)} read")
+                continue
+            actual = zlib.crc32(payload) & 0xFFFFFFFF
+            checked += 1
+            bytes_read += length
+            if actual != crc:
+                failures.append(f"{ext}/{directory}/{name}: crc 0x{crc:08X} recorded, 0x{actual:08X} computed")
+    finally:
+        for handle in handles.values():
+            if handle:
+                handle.close()
+    return checked, bytes_read, failures
+
+
 def main(argv):
-    if len(argv) < 2:
+    args = [item for item in argv[1:] if not item.startswith("--")]
+    crc_check = "--crc" in argv
+    limit = None
+    for index, item in enumerate(argv):
+        if item == "--limit" and index + 1 < len(argv):
+            limit = int(argv[index + 1])
+            args = [value for value in args if value != argv[index + 1]]
+    if not args:
         print(__doc__)
         return 2
+    argv = [argv[0]] + args
     total_entries = total_extents = total_preload = 0
     by_extension = {}
     problems = []
@@ -121,6 +196,22 @@ def main(argv):
                     print(f"  parsed the tree up to entry {len(entries)}: {errors[0].split(': ', 1)[-1]}")
                 if missing:
                     print(f"  missing archive files: {missing[:6]}{'...' if len(missing) > 6 else ''}")
+                out_of_bounds = 0
+                for ext, directory, name, _crc, _pl, archive, offset, length in entries:
+                    if archive == 0x7FFF:
+                        continue
+                    source = archive_path(dir_path, archive)
+                    try:
+                        if offset + length > os.path.getsize(source):
+                            out_of_bounds += 1
+                    except OSError:
+                        pass
+                if out_of_bounds:
+                    problems.append(f"{os.path.relpath(dir_path, root)}: {out_of_bounds} entries past the end of their archive")
+                if crc_check:
+                    checked, bytes_read, failures = verify_crc(dir_path, entries, limit)
+                    print(f"  crc: {checked} entries, {bytes_read} B verified, {len(failures)} failure(s)")
+                    problems.extend(failures[:5])
                 for ext, _p, _n, _c, _pl, _a, _o, length in entries:
                     key = f".{ext.lower()}" if ext else "(none)"
                     by_extension[key] = by_extension.get(key, 0) + length
