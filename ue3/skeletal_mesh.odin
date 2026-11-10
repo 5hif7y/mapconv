@@ -18,9 +18,69 @@ SKEL_NAME_INDEX_ENTRY :: 12
 // (instead of producing shifted data) on any version whose gates differ from
 // the ones measured here: 493 <= package < 592 with licensee 5.
 Skeletal_Mesh :: struct {
-	bones:    int,
-	lods:     int,
-	sections: int,
+	bones:            int,
+	lods:             int,
+	sections:         int,
+	section_triangles:  int, // triangles the sections of every LOD declare
+	material_anomalies: int, // sections naming a material past the mesh's array
+}
+
+// read_i32_at reads a little-endian count that was skipped over.
+read_i32_at :: proc(data: []u8, at: int) -> i32 {
+	if at < 0 || at + 4 > len(data) {
+		return 0
+	}
+	return i32(u32(data[at]) | u32(data[at + 1]) << 8 | u32(data[at + 2]) << 16 | u32(data[at + 3]) << 24)
+}
+
+// section_layout_ok checks the sections of one LOD against each other: the offset
+// of a section's indices is three times the triangles before it (the sections tile
+// the index buffer), the material index is inside the material array and every
+// triangle count is positive. It is the cross-check that fixes the field order of a
+// 10-byte record and, with it, that the index count can be predicted before it is
+// read.
+section_layout_ok :: proc(
+	data: []u8,
+	at: int,
+	count: int,
+	materials: i32,
+	result: ^Skeletal_Mesh,
+	d: ^diag.Diagnostics,
+) -> bool {
+	expected := 0
+	for i in 0 ..< count {
+		base := at + i * SKEL_SECTION_SIZE
+		if base < 0 || base + SKEL_SECTION_SIZE > len(data) {
+			diag.err(d, "ue3.skeletal-section-overrun", fmt.aprintf("section %d of %d does not fit", i, count))
+			return false
+		}
+		material := int(u16(data[base]) | u16(data[base + 1]) << 8)
+		chunk := int(u16(data[base + 2]) | u16(data[base + 3]) << 8)
+		base_index := int(read_i32_at(data, base + 4))
+		triangles := int(u16(data[base + 8]) | u16(data[base + 9]) << 8)
+		if triangles <= 0 {
+			diag.err(d, "ue3.skeletal-section-empty", fmt.aprintf("section %d of %d has %d triangles", i, count, triangles))
+			return false
+		}
+		if base_index != expected {
+			diag.err(d, "ue3.skeletal-section-offset",
+				fmt.aprintf("section %d starts at index %d, the sections before it end at %d", i, base_index, expected))
+			return false
+		}
+		// The material index of a section is inside the mesh's own material array in
+		// every mesh but one in the corpus: CH_MNPCguard01_lobby has three sections
+		// naming materials 0, 1 and 2 while its array holds two, so the index can
+		// reach past the array it is written against. It is reported, not enforced,
+		// because the offset, the triangle count and the index words below already
+		// tie the record down.
+		if materials > 0 && material >= int(materials) {
+			result.material_anomalies += 1
+		}
+		_ = chunk
+		expected += triangles * 3
+	}
+	result.section_triangles = expected / 3
+	return true
 }
 
 read_skeletal_mesh :: proc(
@@ -87,9 +147,11 @@ read_skeletal_mesh :: proc(
 		return
 	}
 	// Materials: TArray<UMaterialInterface*> as package indices.
+	materials_at := r.pos
 	if !array(&r, &d, 4, "materials") {
 		return
 	}
+	material_count := read_i32_at(pkg.data, materials_at)
 	// Origin, RotOrigin.
 	if !consumed(&r, &d, 24, "origin") {
 		return
@@ -121,10 +183,23 @@ read_skeletal_mesh :: proc(
 		   !consumed(&r, &d, int(sections) * SKEL_SECTION_SIZE, "sections") {
 			return
 		}
+		// FSkelMeshSection as this build serializes it: material, chunk, the offset
+		// of the section's indices and its triangle count. The sections tile the
+		// LOD's index buffer, so the offset of each one is three times the triangles
+		// before it and the total is the index count; reading them at 10 bytes with
+		// any other layout breaks that identity on the first multi-section mesh.
+		if !section_layout_ok(pkg.data, r.pos - int(sections) * SKEL_SECTION_SIZE, int(sections), material_count, &result, &d) {
+			return
+		}
 		result.sections += int(sections)
 		// MultiSizeIndexContainer: DataTypeSize then the index words.
 		data_type := read_i32(&r)
 		index_count := read_i32(&r)
+		if i32(result.section_triangles) * 3 != index_count {
+			diag.err(&d, "ue3.skeletal-index-count",
+				fmt.aprintf("%d section triangle(s) against %d index word(s)", result.section_triangles, index_count))
+			return
+		}
 		if !count_ok(&r, &d, index_count, 50_000_000, "indices") {
 			return
 		}

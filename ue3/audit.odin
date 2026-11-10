@@ -190,6 +190,8 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 			_, skel_d := read_skeletal_mesh(pkg, index, allocator)
 			if !diag.has_errors(&skel_d) {
 				interpreted = i64(e.serial_size)
+			} else if len(skel_d.items) > 0 && detail == "" {
+				detail = skel_d.items[0].message
 			}
 			delete(skel_d.items)
 		case "IntProperty", "BoolProperty", "FloatProperty", "StrProperty", "NameProperty", "ObjectProperty", "StructProperty", "ArrayProperty", "ByteProperty", "ComponentProperty", "InterfaceProperty", "DelegateProperty", "MapProperty", "ClassProperty":
