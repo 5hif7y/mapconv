@@ -19,6 +19,7 @@ import "convert"
 import "diag"
 import "ir"
 import "ue3"
+import "vpk"
 import "vtf"
 import "xform"
 
@@ -42,7 +43,8 @@ Options:
   --profile <name>     entity mapping profile (default, source1-to-unreal3,
                        unreal3-to-source1)
   --report <file>      write the diagnostic report to a file as well as stderr
-  --content <dir>      cooked content directory used to resolve mesh imports
+  --content <dir>      cooked content directory for mesh imports, or the game root
+                       (or a _dir.vpk) whose VPKs the material report resolves
   --quiet              only print errors
   --no-materials       skip the per-material notes
 
@@ -275,7 +277,15 @@ run_inspect :: proc(args: Args, text: string) {
 	if format == .Source_BSP {
 		report, ok := bsp.materials_of(transmute([]u8)text, filepath.stem(args.input))
 		if ok {
+			trees, have_trees := content_trees(args.content)
+			if have_trees {
+				resolve_materials(&report, trees)
+			}
 			fmt.println(bsp.material_report_text(report))
+			for &tree in trees {
+				vpk.destroy(&tree)
+			}
+			delete(trees)
 			bsp.material_report_destroy(&report)
 		}
 	}
@@ -304,6 +314,96 @@ run_validate :: proc(args: Args, text: string) {
 		os.exit(1)
 	}
 	fmt.printfln("ok: %s", diag.summary(&diagnostics))
+}
+
+// content_trees opens the VPK directory files of a game root so the material report
+// can say which names live outside the map. A path may name a _dir.vpk directly or a
+// directory that holds one or more of them.
+content_trees :: proc(content: string, allocator := context.allocator) -> (trees: []vpk.Tree, ok: bool) {
+	if content == "" {
+		return nil, false
+	}
+	paths := make([dynamic]string, 0, 4, allocator)
+	defer delete(paths)
+	if strings.has_suffix(strings.to_lower(content, context.temp_allocator), ".vpk") {
+		append(&paths, strings.clone(content, allocator))
+	} else {
+		// A game root keeps its archives one level down (csso/, cstrike/, hl2/), so
+		// the scan looks at the directory and at each of its subdirectories.
+		collect_dir_vpks(&paths, content, allocator)
+		entries, err := os.read_directory_by_path(content, -1, allocator)
+		if err == nil {
+			defer delete(entries)
+			for entry in entries {
+				if entry.type != .Directory {
+					continue
+				}
+				child := fmt.aprintf("%s/%s", content, entry.name, allocator = allocator)
+				collect_dir_vpks(&paths, child, allocator)
+				delete(child)
+			}
+		}
+	}
+	built := make([dynamic]vpk.Tree, 0, len(paths), allocator)
+	for path in paths {
+		tree, d := vpk.parse(path, allocator)
+		delete(d.items)
+		if diag.has_errors(&d) {
+			continue
+		}
+		append(&built, tree)
+	}
+	for path in paths {
+		delete(path)
+	}
+	if len(built) == 0 {
+		return nil, false
+	}
+	return built[:], true
+}
+
+// collect_dir_vpks appends the _dir.vpk files of one directory.
+collect_dir_vpks :: proc(paths: ^[dynamic]string, directory: string, allocator := context.allocator) {
+	entries, err := os.read_directory_by_path(directory, -1, allocator)
+	if err != nil {
+		return
+	}
+	defer delete(entries)
+	for entry in entries {
+		lower := strings.to_lower(entry.name, context.temp_allocator)
+		if !strings.has_suffix(lower, "_dir.vpk") {
+			continue
+		}
+		append(paths, fmt.aprintf("%s/%s", directory, entry.name, allocator = allocator))
+	}
+}
+
+// resolve_materials counts how many of the names the map does not carry are in the
+// game VPK after all, and how many are nowhere.
+resolve_materials :: proc(report: ^bsp.Mat_Report, trees: []vpk.Tree) {
+	report.in_vpk = 0
+	report.nowhere = 0
+	kept := make([dynamic]string, 0, len(report.missing), context.allocator)
+	for name in report.missing {
+		found := false
+		path := fmt.aprintf("materials/%s.vmt", name, allocator = context.temp_allocator)
+		for &tree in trees {
+			_, _, ok := vpk.lookup(&tree, path)
+			if ok {
+				found = true
+				break
+			}
+		}
+		if found {
+			report.in_vpk += 1
+			delete(name)
+		} else {
+			report.nowhere += 1
+			append(&kept, name)
+		}
+	}
+	delete(report.missing)
+	report.missing = kept[:]
 }
 
 // run_extract_bsp writes the pakfile entries of a Source BSP (lump 40), which
@@ -361,7 +461,15 @@ run_extract_bsp :: proc(args: Args, text: string) {
 	fmt.printfln("extracted %d of %d pakfile entr(ies), %d bytes (%d skipped)", written, len(entries), bytes, skipped)
 	report, report_ok := bsp.materials_of(data, filepath.stem(args.input))
 	if report_ok {
+		trees, have_trees := content_trees(args.content)
+		if have_trees {
+			resolve_materials(&report, trees)
+		}
 		fmt.println(bsp.material_report_text(report))
+		for &tree in trees {
+			vpk.destroy(&tree)
+		}
+		delete(trees)
 		bsp.material_report_destroy(&report)
 	}
 	print_diagnostics(&diagnostics, args.quiet, args.report)

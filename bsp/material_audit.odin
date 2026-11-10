@@ -16,6 +16,8 @@ Mat_Report :: struct {
 	in_pakfile:   int, // of those, how many have their VMT inside lump 40
 	with_texture: int, // of those, how many also carry the VTF the VMT asks for
 	packed:       int, // entries in the archive in total
+	in_vpk:       int, // of the missing, how many the game VPK does hold
+	nowhere:      int, // of the missing, how many no VPK has
 	missing:      []string, // names with no VMT in the archive (owned by the caller)
 }
 
@@ -134,6 +136,32 @@ basetexture_of :: proc(text: string) -> (name: string, ok: bool) {
 
 // material_report_text renders the split for inspect and extract.
 material_report_text :: proc(report: Mat_Report) -> string {
+	if report.in_vpk > 0 || report.nowhere > 0 {
+		if report.nowhere > 0 && len(report.missing) > 0 {
+			names := strings.builder_make(0, 128)
+			for name, i in report.missing {
+				if i == 4 {
+					strings.write_string(&names, " …")
+					break
+				}
+				if i > 0 {
+					strings.write_string(&names, ", ")
+				}
+				strings.write_string(&names, name)
+			}
+			return fmt.aprintf(
+				"materials: %d named · %d in the pakfile (%d with the VTF too) · %d outside: %d in the game VPK, %d nowhere (%s)",
+				report.named, report.in_pakfile, report.with_texture,
+				report.named - report.in_pakfile, report.in_vpk, report.nowhere,
+				strings.to_string(names),
+			)
+		}
+		return fmt.aprintf(
+			"materials: %d named · %d in the pakfile (%d with the VTF too) · %d outside: %d in the game VPK, %d nowhere",
+			report.named, report.in_pakfile, report.with_texture,
+			report.named - report.in_pakfile, report.in_vpk, report.nowhere,
+		)
+	}
 	return fmt.aprintf(
 		"materials: %d named · %d with a VMT in the pakfile · %d of those with the VTF too · %d to resolve from the game VPK",
 		report.named, report.in_pakfile, report.with_texture,
