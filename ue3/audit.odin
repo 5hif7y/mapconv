@@ -104,11 +104,27 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 		// class plus net index) even though their class name does not end in
 		// "Component". The prelude and the tag stream are credited byte by byte.
 		if strings.has_prefix(class, "UIComp_") {
-			ui_head, ui_d := read_object_head_ex(pkg, e, allocator, true)
-			if !diag.has_errors(&ui_d) {
-				interpreted = i64(ui_head.body_offset - int(e.serial_offset))
+			// A template of a UI component may or may not carry the prelude, and a
+			// class default object never does. Both readings are tried and the one
+			// that explains more bytes wins; the tag stream bounds each of them.
+			best: i64 = interpreted
+			if ui_head, ui_d := read_object_head_ex(pkg, e, allocator, true); !diag.has_errors(&ui_d) {
+				if value := i64(ui_head.body_offset - int(e.serial_offset)); value > best {
+					best = value
+				}
+				delete(ui_d.items)
+			} else {
+				delete(ui_d.items)
 			}
-			delete(ui_d.items)
+			if plain_head, plain_d := read_object_head_ex(pkg, e, allocator, false, true); !diag.has_errors(&plain_d) {
+				if value := i64(plain_head.body_offset - int(e.serial_offset)); value > best {
+					best = value
+				}
+				delete(plain_d.items)
+			} else {
+				delete(plain_d.items)
+			}
+			interpreted = best
 		} else {
 		switch class {
 		case "StaticMesh":
