@@ -249,7 +249,7 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 				detail = style_d.items[0].message
 			}
 			delete(style_d.items)
-		case "PrefabInstance":
+		case "PrefabInstance", "UIPrefabInstance":
 			entries, prefab_d := read_prefab_instance(pkg, index, allocator)
 			if !diag.has_errors(&prefab_d) {
 				interpreted = i64(e.serial_size)
@@ -258,6 +258,14 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 			}
 			_ = entries
 			delete(prefab_d.items)
+		case "ForceFeedbackWaveform":
+			_, wave_d := read_force_feedback_waveform(pkg, index, allocator)
+			if !diag.has_errors(&wave_d) {
+				interpreted = i64(e.serial_size)
+			} else if len(wave_d.items) > 0 && detail == "" {
+				detail = wave_d.items[0].message
+			}
+			delete(wave_d.items)
 		case "UISkin":
 			_, skin_d := read_ui_skin(pkg, index, allocator)
 			if !diag.has_errors(&skin_d) {

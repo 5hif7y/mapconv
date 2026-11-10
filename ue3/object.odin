@@ -777,3 +777,43 @@ read_ui_skin :: proc(
 }
 
 
+
+// VER_FORCEFEEDBACKWAVERFORM_NOEXPORT_CHANGE (Core/Inc/UnObjVer.h:333), spelled as
+// the engine spells it.
+VER_FORCEFEEDBACKWAVEFORM_NOEXPORT_CHANGE :: 677
+
+// UForceFeedbackWaveform::Serialize (Engine/Inc/EngineClasses.h:16478). Below package
+// version 677, and only when loading, the payload carries the looping flag and the
+// sample array that the editor used to export: an INT and a counted array of
+// FWaveformSample, which is four bytes and a float.
+read_force_feedback_waveform :: proc(
+	pkg: ^Package,
+	export_index: int,
+	allocator := context.allocator,
+) -> (samples: int, d: diag.Diagnostics) {
+	d = diag.init()
+	if export_index < 0 || export_index >= len(pkg.exports) {
+		diag.err(&d, "ue3.bad-export", fmt.aprintf("export index %d out of range", export_index))
+		return
+	}
+	if engine_version(&pkg.summary) >= VER_FORCEFEEDBACKWAVEFORM_NOEXPORT_CHANGE {
+		diag.err(&d, "ue3.bad-waveform", "this package writes no waveform body")
+		return
+	}
+	head, head_d := read_object_head(pkg, pkg.exports[export_index], allocator, export_index)
+	if diag.has_errors(&head_d) {
+		d = head_d
+		return
+	}
+	delete(head_d.items)
+	r := Reader{data = pkg.data, pos = head.body_offset, limit = head.end_offset}
+	_ = read_i32(&r) // looping flag
+	count := read_i32(&r)
+	if r.failed || count < 0 || i64(count) * 8 != i64(head.end_offset - r.pos) {
+		diag.err(&d, "ue3.bad-waveform", fmt.aprintf("a waveform of %d samples cannot hold the tail", count))
+		return
+	}
+	samples = int(count)
+	return
+}
+
