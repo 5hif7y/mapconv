@@ -13,9 +13,14 @@
 // The fragment records are not described anywhere in the tree (FFracturedMeshFragment
 // is absent), so the reader anchors from the tail instead: it walks the static
 // mesh part, reads the fragment count, validates the sixty byte tail (core and
-// interior indices, the four vectors, the two build words) and requires the
-// fragment region to end exactly where that tail starts. The fragment contents
-// stay opaque; only their envelope is credited.
+// interior indices, the three vectors and the plane bias, the two build words) and
+// requires the fragment region to end exactly where that tail starts. The fragment
+// contents stay opaque; only their envelope is credited.
+//
+// Measured, and the limit of this reader: the corpus holds exactly two fractured meshes
+// (1,066,447 B), both with one fragment, so the size of a fragment record cannot be
+// measured from the data and the divisibility test on the region cannot fail there. What
+// is checked is the tail, field by field, and that the envelope closes.
 package ue3
 
 import "core:fmt"
