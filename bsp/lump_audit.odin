@@ -1024,6 +1024,12 @@ texdata_string_data_reason :: proc(data: []u8, offset, length: int) -> string {
 	if data[offset + length - 1] != 0 {
 		return "the material name blob does not end with a terminator"
 	}
+	// The first name starts at the first byte, so a blob that opens with a terminator
+	// holds an empty name -- the same rule the loop below applies to every later name,
+	// and the reason a one byte blob is refused instead of accepted as "one name".
+	if data[offset] == 0 {
+		return "the material name blob holds an empty name"
+	}
 	for i in 1 ..< length {
 		if data[offset + i] == 0 && data[offset + i - 1] == 0 {
 			return "the material name blob holds an empty name"
@@ -1823,6 +1829,11 @@ entities_reason :: proc(data: []u8, offset, length: int) -> string {
 		}
 		token := string(data[offset + start:offset + position])
 		position += 1
+		if token == "" {
+			// A terminator where a token should start opens nothing and names nothing:
+			// the lump would be read as a sequence of pairs that are not there.
+			return "the entity lump holds an empty token"
+		}
 		switch token {
 		case "{":
 			// One token opens a block: the class name.
