@@ -12,10 +12,25 @@ import "../diag"
 // by that many bytes. The element-size word that Array.h writes is not present
 // in this build's cooked form, so the reader follows the measurement; the
 // payload is a PhysX blob ("NXS" magic) and is skipped, not decoded.
+// Every convex element is a cache of a PhysX cooked mesh, and a cooked mesh always
+// opens as a Nexus stream: twelve bytes of quick-load header, then "NXS" and the
+// format version. The header is the one cross-check the payload offers without
+// decoding PhysX, and it is enough to notice a walk that drifts into the middle of
+// an element.
+PHYSX_STREAM_MAGIC :: "NXS\x01"
+// PhysX writes four sections into a cooked convex mesh (hull, big hull, gauss map,
+// mass properties) and the quick-load header counts them.
+PHYSX_CHUNKS :: 4
+
 Brush_Component :: struct {
 	convex_sets: int,
 	elements:    int,
 	payload:     i64,
+	// Measured, not enforced: the quick-load header holds a size, a zero and a chunk
+	// count. The chunk count is 4 in every element of the corpus; keeping it as a
+	// counter says so without inventing a rule from three samples.
+	chunk_counts: map[i32]int,
+	header_sizes: i64,
 }
 
 read_brush_component :: proc(
@@ -38,7 +53,8 @@ read_brush_component :: proc(
 	r := Reader{data = pkg.data, pos = head.body_offset, limit = head.end_offset}
 
 	ok: bool
-	result.convex_sets, result.elements, result.payload, ok = walk_cached_convex_sets(&r, &d, "brush")
+	result.chunk_counts = make(map[i32]int, 4, allocator)
+	result.convex_sets, result.elements, result.payload, ok = walk_cached_convex_sets(&r, &d, "brush", &result.chunk_counts, &result.header_sizes)
 	if !ok {
 		return
 	}
@@ -58,6 +74,8 @@ walk_cached_convex_sets :: proc(
 	r: ^Reader,
 	d: ^diag.Diagnostics,
 	what: string,
+	chunk_counts: ^map[i32]int = nil,
+	header_sizes: ^i64 = nil,
 ) -> (sets_out: int, elements_out: int, payload_out: i64, ok: bool) {
 	sets := read_i32(r)
 	if r.failed || sets < 0 || sets > 64 {
@@ -80,6 +98,25 @@ walk_cached_convex_sets :: proc(
 			if i64(count) > i64(r.limit - r.pos) {
 				diag.err(d, "ue3.bad-cached-phys", fmt.aprintf("%s: bulk payload overruns the export", what))
 				return
+			}
+			if count < 16 || string(r.data[r.pos + 12:r.pos + 16]) != PHYSX_STREAM_MAGIC {
+				diag.err(d, "ue3.physx-magic",
+					fmt.aprintf("%s: a convex element of %d bytes does not carry the PhysX stream header", what, count))
+				return
+			}
+			// The quick-load header is {size, zero, chunk count} before the stream. The
+			// zero word and the count of four sections held in all 4,234 elements of the
+			// corpus, so a different value means the walk is reading a size that is not
+			// an element.
+			if read_i32_at(r.data, r.pos + 4) != 0 || read_i32_at(r.data, r.pos + 8) != PHYSX_CHUNKS {
+				diag.err(d, "ue3.physx-header",
+					fmt.aprintf("%s: a convex element of %d bytes has no quick-load header", what, count))
+				return
+			}
+			if chunk_counts != nil {
+				chunks := u32(read_i32_at(r.data, r.pos + 8))
+				chunk_counts^[i32(chunks)] = chunk_counts^[i32(chunks)] + 1
+				header_sizes^ += i64(u32(read_i32_at(r.data, r.pos)))
 			}
 			r.pos += int(count)
 			elements_out += 1

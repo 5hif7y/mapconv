@@ -46,6 +46,11 @@ Audit :: struct {
 	shader_nulls:     int,
 	shader_map_bytes: int,
 	shader_id_mismatch:       int,
+	// PhysX convex caches: how many elements were checked for the Nexus header and how
+	// many chunks their quick-load headers declare.
+	physx_elements:    int,
+	physx_bytes:       i64,
+	physx_chunk_counts: map[i32]int,
 }
 
 audit_row :: proc(audit: ^Audit, class_name: string, allocator := context.allocator) -> ^Audit_Row {
@@ -319,6 +324,10 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 			phys, phys_d := read_precached_phys_data(pkg, index)
 			if !diag.has_errors(&phys_d) {
 				interpreted = i64(e.serial_size)
+				audit.physx_elements += len(phys.blobs)
+				for blob in phys.blobs {
+					audit.physx_bytes += i64(blob.size)
+				}
 			} else if len(phys_d.items) > 0 && detail == "" {
 				detail = phys_d.items[0].message
 			}
@@ -413,10 +422,18 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 			}
 			delete(st_d.items)
 		case "BrushComponent":
-			_, bc_d := read_brush_component(pkg, index, allocator)
+			bc, bc_d := read_brush_component(pkg, index, allocator)
 			if !diag.has_errors(&bc_d) {
 				interpreted = i64(e.serial_size)
+				audit.physx_elements += bc.elements
+				audit.physx_bytes += bc.payload
+				for k, v in bc.chunk_counts {
+					audit.physx_chunk_counts[k] = audit.physx_chunk_counts[k] + v
+				}
+			} else if len(bc_d.items) > 0 && detail == "" {
+				detail = bc_d.items[0].message
 			}
+			delete(bc.chunk_counts)
 			delete(bc_d.items)
 		case "SoundCue":
 			_, sc_d := read_sound_cue(pkg, index, allocator)
@@ -649,6 +666,19 @@ audit_text :: proc(audit: ^Audit) -> string {
 	}
 	fmt.sbprintf(&b, "credited:        %d (%.1f%% of file, payload + tables)\n", credited, pct(credited, audit.file_size))
 	fmt.sbprintf(&b, "uninterpreted:   %d (%.1f%%)\n", audit.file_size - credited, pct(audit.file_size - credited, audit.file_size))
+	if audit.physx_elements > 0 {
+		fmt.sbprintf(&b, "physics:         %d convex element(s), %d bytes of PhysX blob",
+			audit.physx_elements, audit.physx_bytes)
+		if len(audit.physx_chunk_counts) > 0 {
+			parts := make([dynamic]string, 0, len(audit.physx_chunk_counts))
+			for k, v in audit.physx_chunk_counts {
+				append(&parts, fmt.aprintf("%d chunks x%d", k, v))
+			}
+			fmt.sbprintf(&b, " (%s)", strings.join(parts[:], ", "))
+			delete(parts)
+		}
+		strings.write_byte(&b, '\n')
+	}
 	if audit.shader_maps > 0 {
 		fmt.sbprintf(&b, "shader maps:     %d map(s), %d shader reference(s) (%d null), %d bytes",
 			audit.shader_maps, audit.shader_refs, audit.shader_nulls, audit.shader_map_bytes)

@@ -258,7 +258,6 @@ material_shader_map :: proc(
 				return false
 			}
 			result.null_refs += 1
-			fmt.eprintln("DBG null ref, count", result.null_refs)
 			return true
 		}
 		if !catalog[guid] {

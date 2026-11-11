@@ -12,6 +12,8 @@ Body_Setup :: struct {
 	convex_sets: int,
 	elements:    int,
 	payload:     i64,
+	chunk_counts: map[i32]int,
+	header_sizes: i64,
 }
 
 read_body_setup :: proc(
