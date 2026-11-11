@@ -2,6 +2,7 @@ package ue3
 
 import "core:fmt"
 import "core:math"
+import "core:strings"
 import "../diag"
 
 // UPersistentCookerData (UnrealEd/Src/UnContentCookers.cpp:14918) keeps the
@@ -57,8 +58,30 @@ read_persistent_cooker_data :: proc(
 		fail(&d, "implausible bulk data info count")
 		return
 	}
+	// Every key names a bulk block, and a block is written once: no two entries may
+	// carry the same key, and every key has to look like a path. Over the corpus the
+	// single object of this class has 90,463 entries, 0 repeated and 0 without a
+	// separator, which is what makes this a check of the walk and not a count of it.
+	keys := make(map[string]bool, int(infos), context.allocator)
+	defer {
+		for key in keys {
+			delete(key)
+		}
+		delete(keys)
+	}
 	for _ in 0 ..< int(infos) {
-		_ = read_fstring(&r)
+		key := read_fstring(&r)
+		if !r.failed && key != "" {
+			if key in keys {
+				fail(&d, "a bulk data key appears twice")
+				return
+			}
+			if !strings.contains_rune(key, '/') && !strings.contains_rune(key, '.') {
+				fail(&d, "a bulk data key is not a path")
+				return
+			}
+			keys[strings.clone(key, context.allocator)] = true
+		}
 		_ = read_i32(&r) // SavedBulkDataFlags
 		elements := read_i32(&r)
 		_ = read_i32(&r) // offset, INDEX_NONE allowed
