@@ -785,32 +785,35 @@ store_i16_bytes :: proc(data: []u8, offset: int, value: i16) {
 test_lightmap_regions_tile_the_lump :: proc(t: ^testing.T) {
 	data := build_light_tile_map(2, 3)
 	defer delete(data)
-	ok, regions, covered, total := lightmap_tiling(data, 8)
+	ok, regions, covered, total, extra := lightmap_tiling(data, 8)
 	testing.expect(t, ok)
 	testing.expect_value(t, regions, 1)
 	testing.expect_value(t, covered, i64(4 * 3 * 4))
 	testing.expect_value(t, total, i64(4 + 4 * 3 * 4))
+	// The fixture carries one plane per style, so the layout that tiles it is the one
+	// without the extra plane; a reader that assumed one would not land on the end.
+	testing.expect_value(t, extra, 0)
 
 	// A region that starts somewhere else than the four bytes after the previous one
 	// is not the region of this face.
 	shifted := build_light_tile_map(2, 3)
 	defer delete(shifted)
 	store_i32(shifted, 1024 + 20, 8)
-	ok2, _, _, _ := lightmap_tiling(shifted, 8)
+	ok2, _, _, _, _ := lightmap_tiling(shifted, 8)
 	testing.expect(t, !ok2)
 
 	// A lump with four bytes more than the faces explain is not tiled.
 	long := build_light_tile_map(2, 3)
 	defer delete(long)
 	store_i32(long, 8 + 8 * 16 + 4, i32(4 + 4 * 3 * 4 + 4))
-	ok3, _, _, _ := lightmap_tiling(long, 8)
+	ok3, _, _, _, _ := lightmap_tiling(long, 8)
 	testing.expect(t, !ok3)
 
 	// The bump bit of the texinfo doubles nothing by itself, it quadruples the planes.
 	bump := build_light_tile_map(2, 3)
 	defer delete(bump)
 	store_i32(bump, 2048 + 64, 0x800)
-	ok4, _, covered4, _ := lightmap_tiling(bump, 8)
+	ok4, _, covered4, _, _ := lightmap_tiling(bump, 8)
 	testing.expect(t, !ok4)
 	// The four planes are measured even when the region no longer fits the lump.
 	testing.expect_value(t, covered4, i64(4 * 3 * 4 * 4))

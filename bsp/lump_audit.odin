@@ -119,6 +119,7 @@ Lump_Audit :: struct {
 	// The luxels of the regions that tiled: how many were decoded, and the range of
 	// their shared exponents. A luxel outside the range any face of the corpus uses is
 	// a region read at the wrong offset even when its length is right.
+	lightmap_extra_planes: int, // lumps whose layout needs the extra plane
 	lightmap_luxels:       i64,
 	lightmap_exp_min:      i32,
 	lightmap_exp_max:      i32,
@@ -159,7 +160,7 @@ audit_lumps :: proc(data: []u8) -> Lump_Audit {
 		}
 		if i == LUMP_LIGHTING || i == LUMP_LIGHTING_HDR {
 			result.lightmap_lumps += 1
-			tiles, regions, covered, total := lightmap_tiling(data, i)
+			tiles, regions, covered, total, extra_planes := lightmap_tiling(data, i)
 			faces_lump := LUMP_FACES
 			if i == LUMP_LIGHTING_HDR {
 				faces_lump = LUMP_FACES_HDR
@@ -169,7 +170,10 @@ audit_lumps :: proc(data: []u8) -> Lump_Audit {
 				result.lightmap_attributed += covered
 				result.lightmap_total += total
 				result.lightmap_tiled += 1
-				luxels, low, high := lightmap_luxel_range(data, i, faces_lump, lightmap_extra_plane(data))
+				if extra_planes > 0 {
+					result.lightmap_extra_planes += 1
+				}
+				luxels, low, high := lightmap_luxel_range(data, i, faces_lump, extra_planes)
 				result.lightmap_luxels += luxels
 				if luxels > 0 {
 					if result.lightmap_exp_min == 0 || low < result.lightmap_exp_min {
@@ -294,8 +298,8 @@ audit_lumps_text :: proc(a: ^Lump_Audit) -> string {
 			percent(a.lightmap_attributed, a.lightmap_total),
 			a.lightmap_tiled, a.lightmap_lumps)
 		if a.lightmap_luxels > 0 {
-			fmt.sbprintf(&b, "                 %d luxels decoded, exponents %d..%d\n",
-				a.lightmap_luxels, a.lightmap_exp_min, a.lightmap_exp_max)
+			fmt.sbprintf(&b, "                 %d luxels decoded, exponents %d..%d, extra plane on %d of the tiled lumps\n",
+				a.lightmap_luxels, a.lightmap_exp_min, a.lightmap_exp_max, a.lightmap_extra_planes)
 		}
 	}
 	if a.phys_models > 0 {
@@ -507,7 +511,28 @@ lightmap_extra_plane :: proc(data: []u8) -> int {
 // the first region starts after the four bytes that open the lump, every next one
 // starts where the previous ended, and the last one ends with the lump. A map that
 // fails is reported instead of being credited.
-lightmap_tiling :: proc(data: []u8, index: int) -> (ok: bool, regions: int, covered: i64, total: i64) {
+// lightmap_tiling reports whether some face regions tile this lump exactly, and with how
+// many planes per style beyond the ones the texinfo asks for.
+//
+// The writer adds a plane on some maps and not on others, and the flag that was believed
+// to say so (bit 2 of the map flags) does not: measured over the corpus, maps with the bit
+// need no extra plane in 9 lumps and one in 34, and maps without it need one in 39 and
+// none in 25. What does decide is the arithmetic, because a wrong plane count cannot land
+// on the end of the lump: the two candidates are tried, one at a time, and the one that
+// tiles is the one the lump is built with. No lump in the corpus tiles with both.
+lightmap_tiling :: proc(data: []u8, index: int) -> (ok: bool, regions: int, covered: i64, total: i64, extra: int) {
+	first, r1, c1, t1 := lightmap_tiling_with(data, index, 1)
+	if first {
+		return first, r1, c1, t1, 1
+	}
+	second, r2, c2, t2 := lightmap_tiling_with(data, index, 0)
+	if second {
+		return second, r2, c2, t2, 0
+	}
+	return false, r2, c2, t2, -1
+}
+
+lightmap_tiling_with :: proc(data: []u8, index: int, extra: int) -> (ok: bool, regions: int, covered: i64, total: i64) {
 	faces_lump := LUMP_FACES
 	if index == LUMP_LIGHTING_HDR {
 		faces_lump = LUMP_FACES_HDR
@@ -519,7 +544,6 @@ lightmap_tiling :: proc(data: []u8, index: int) -> (ok: bool, regions: int, cove
 		return
 	}
 	total = i64(length)
-	extra := lightmap_extra_plane(data)
 	// One region per face: for every style, four bytes and then the samples of every
 	// lighting plane of that style. The faces are not always written in face order, so
 	// the regions are sorted by the offset they name before the walk.
