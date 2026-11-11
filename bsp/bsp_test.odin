@@ -788,7 +788,7 @@ test_lightmap_regions_tile_the_lump :: proc(t: ^testing.T) {
 	ok, regions, covered, total, extra := lightmap_tiling(data, 8)
 	testing.expect(t, ok)
 	testing.expect_value(t, regions, 1)
-	testing.expect_value(t, covered, i64(4 * 3 * 4))
+	testing.expect_value(t, covered, i64(4 + 4 * 3 * 4))
 	testing.expect_value(t, total, i64(4 + 4 * 3 * 4))
 	// The fixture carries one plane per style, so the layout that tiles it is the one
 	// without the extra plane; a reader that assumed one would not land on the end.
@@ -816,7 +816,79 @@ test_lightmap_regions_tile_the_lump :: proc(t: ^testing.T) {
 	ok4, _, covered4, _, _ := lightmap_tiling(bump, 8)
 	testing.expect(t, !ok4)
 	// The four planes are measured even when the region no longer fits the lump.
-	testing.expect_value(t, covered4, i64(4 * 3 * 4 * 4))
+	testing.expect_value(t, covered4, i64(4 + 4 * 3 * 4 * 4))
+}
+
+// build_mixed_style_tile_map builds a map whose first face carries two styles and
+// whose second carries one: the case that tells "four bytes per region" apart from
+// "four bytes per style". Face 0: lightofs 8 (two style words before its samples),
+// 2*2 luxels per style, so 8 + 2*36 = 80 bytes; face 1: lightofs 84, 4 + 36 = 40
+// bytes; the lump is 120 bytes and nothing is left over.
+build_mixed_style_tile_map :: proc(first_lightofs, second_lightofs: i32, length: i32) -> []u8 {
+	data := make([]u8, 4096)
+	store_i32(data, 0, 0x50534256) // VBSP
+	store_i32(data, 4, 20)
+	faces_offset := 1024
+	texinfo_offset := 2048
+	light_offset := 3072
+	store_i32(data, 8 + 7 * 16, i32(faces_offset))
+	store_i32(data, 8 + 7 * 16 + 4, 2 * 56)
+	for k in 0 ..< 2 {
+		face := faces_offset + k * 56
+		store_i16_bytes(data, face + 10, 0) // texinfo 0
+		store_i32(data, face + 36, 2)
+		store_i32(data, face + 40, 2)
+	}
+	// Face 0: two styles, so 0 and 32 then two 0xff.
+	data[faces_offset + 16] = 0
+	data[faces_offset + 17] = 32
+	data[faces_offset + 18] = 0xff
+	data[faces_offset + 19] = 0xff
+	store_i32(data, faces_offset + 20, first_lightofs)
+	// Face 1: one style.
+	data[faces_offset + 56 + 16] = 0
+	data[faces_offset + 56 + 17] = 0xff
+	data[faces_offset + 56 + 18] = 0xff
+	data[faces_offset + 56 + 19] = 0xff
+	store_i32(data, faces_offset + 56 + 20, second_lightofs)
+	store_i32(data, 8 + 6 * 16, i32(texinfo_offset))
+	store_i32(data, 8 + 6 * 16 + 4, 72)
+	store_i32(data, 8 + 8 * 16, i32(light_offset))
+	store_i32(data, 8 + 8 * 16 + 4, length)
+	return data
+}
+
+@(test)
+test_a_region_starts_four_bytes_per_style_before_its_samples :: proc(t: ^testing.T) {
+	// The two faces mix styles, so a reader that expected one word per region would
+	// look for face 0 at 4 and for face 1 at 80.
+	data := build_mixed_style_tile_map(8, 84, 120)
+	defer delete(data)
+	ok, regions, covered, total, extra := lightmap_tiling(data, 8)
+	testing.expectf(t, ok, "the mixed style lump does not tile")
+	testing.expect_value(t, regions, 2)
+	// Every block counts whole: the style words are part of it.
+	testing.expect_value(t, covered, i64(120))
+	testing.expect_value(t, total, i64(120))
+	testing.expect_value(t, extra, 0)
+
+	// A first face at the one-word offset is not where its samples start.
+	flat := build_mixed_style_tile_map(4, 84, 120)
+	defer delete(flat)
+	ok2, _, _, _, _ := lightmap_tiling(flat, 8)
+	testing.expect(t, !ok2, "a region at four bytes was accepted for a two style face")
+
+	// The second region is one word before its samples, not two.
+	second := build_mixed_style_tile_map(8, 88, 120)
+	defer delete(second)
+	ok3, _, _, _, _ := lightmap_tiling(second, 8)
+	testing.expect(t, !ok3, "a region one word too far was accepted for a one style face")
+
+	// The faces explain 120 bytes; a lump with one byte more is not tiled by them.
+	long := build_mixed_style_tile_map(8, 84, 121)
+	defer delete(long)
+	ok4, _, _, _, _ := lightmap_tiling(long, 8)
+	testing.expect(t, !ok4)
 }
 
 // A lightmap luxel is three colour bytes and a shared signed exponent; the engine
@@ -852,7 +924,7 @@ test_lightmap_luxels_are_counted_from_the_face :: proc(t: ^testing.T) {
 	for l in 0 ..< 3 {
 		data[light_offset + 4 + l * 4 + 3] = u8(0xFE)
 	}
-	luxels, low, high := lightmap_luxel_range(data, 8, 7, 0)
+	luxels, low, high := lightmap_luxel_range(data, 8, 7)
 	testing.expect_value(t, luxels, i64(12))
 	testing.expect_value(t, low, i32(-2))
 	testing.expect_value(t, high, i32(1))
@@ -861,6 +933,6 @@ test_lightmap_luxels_are_counted_from_the_face :: proc(t: ^testing.T) {
 	data2 := build_light_tile_map(2, 3)
 	defer delete(data2)
 	store_i32(data2, 8 + 8 * 16 + 4, 4 + 4 * 3 * 4 - 4)
-	luxels2, _, _ := lightmap_luxel_range(data2, 8, 7, 0)
+	luxels2, _, _ := lightmap_luxel_range(data2, 8, 7)
 	testing.expect_value(t, luxels2, i64(0))
 }

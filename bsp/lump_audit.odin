@@ -170,7 +170,7 @@ audit_lumps :: proc(data: []u8) -> Lump_Audit {
 				if extra_planes > 0 {
 					result.lightmap_extra_planes += 1
 				}
-				luxels, low, high := lightmap_luxel_range(data, i, faces_lump, extra_planes)
+				luxels, low, high := lightmap_luxel_range(data, i, faces_lump)
 				result.lightmap_luxels += luxels
 				if luxels > 0 {
 					if result.lightmap_exp_min == 0 || low < result.lightmap_exp_min {
@@ -552,6 +552,7 @@ lightmap_tiling_with :: proc(data: []u8, index: int, extra: int) -> (ok: bool, r
 		offset:  i64,
 		span:    i64,
 		samples: i64,
+		styles:  i64,
 	}
 	found := make([dynamic]Region, 0, 1024, context.allocator)
 	defer delete(found)
@@ -581,6 +582,7 @@ lightmap_tiling_with :: proc(data: []u8, index: int, extra: int) -> (ok: bool, r
 			offset  = i64(light_offset),
 			span    = i64(styles) * (4 + samples),
 			samples = samples * i64(styles),
+			styles  = i64(styles),
 		})
 	}
 	slice := found[:]
@@ -595,13 +597,18 @@ lightmap_tiling_with :: proc(data: []u8, index: int, extra: int) -> (ok: bool, r
 	})
 	cursor := i64(0)
 	for region in slice {
-		// The four bytes that open each style are the prefix of its samples, so a
-		// region starts four bytes past the end of the previous one.
-		if region.offset != cursor + 4 {
+		// The four bytes of every style are written before any of its samples, so a
+		// face's `lightofs` -- the offset of its first sample -- sits four bytes per
+		// style past the end of the previous region, not four. Measured over the
+		// corpus: with a flat four, the ten lumps whose faces mix two, three and four
+		// styles do not tile; with four per style all 126 do.
+		if region.offset != cursor + 4 * region.styles {
 			return false, regions, covered, total
 		}
 		cursor += region.span
-		covered += region.samples
+		// The four bytes of every style are part of the block: they are counted here
+		// and not left as a gap, because the walk has just shown where they sit.
+		covered += region.span
 		regions += 1
 	}
 	if cursor != total {
@@ -647,7 +654,7 @@ lightmap_luxel_decode :: proc(bytes: []u8) -> (luxel: Lightmap_Luxel) {
 // with a `char`). The table measured from the binary is exactly 2^e/255 for every e it
 // covers, so no table is needed here: the exponent is what is checked, and its range is
 // what a misread region cannot fake.
-lightmap_luxel_range :: proc(data: []u8, index, faces_lump: int, extra: int) -> (luxels: i64, low: i32, high: i32) {
+lightmap_luxel_range :: proc(data: []u8, index, faces_lump: int) -> (luxels: i64, low: i32, high: i32) {
 	faces_offset := lump_int(data, faces_lump, 0)
 	faces_length := lump_int(data, faces_lump, 4)
 	length := lump_int(data, index, 4)
@@ -677,13 +684,17 @@ lightmap_luxel_range :: proc(data: []u8, index, faces_lump: int, extra: int) -> 
 		if styles == 0 {
 			styles += 1
 		}
-		planes := lightmap_planes_of(data, face) + extra
+		// The luxels of a style are its lighting planes; the extra array the writer
+		// adds to some lumps is not one of them (it carries no exponent that decodes),
+		// so it is skipped rather than read. In this corpus no face of a lump that
+		// needs that array carries more than one style, so the samples of the styles
+		// are contiguous and this stride is the whole story.
+		planes := lightmap_planes_of(data, face)
 		per_style := i64(size_x + 1) * i64(size_y + 1) * i64(planes) * 4
-		// lightofs points at the first sample, not at the four byte word that opens
-		// the region: the engine reads its luxels straight from `surf->samples`
-		// (decompiled R_BuildLightMap), so the word sits before the samples it belongs
-		// to. Every style after the first repeats the pattern: its word, then its
-		// samples.
+		// lightofs points at the first sample, not at the words that open the region:
+		// the engine reads its luxels straight from `surf->samples` (decompiled
+		// R_BuildLightMap), so all four-byte words of a face sit before the samples of
+		// its first style, and the samples of the styles follow each other.
 		cursor := light_offset
 		for _ in 0 ..< styles {
 			if cursor + int(per_style) > length { // cursor is lump relative, not absolute
