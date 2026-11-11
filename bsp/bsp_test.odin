@@ -623,3 +623,77 @@ test_material_names_and_normals_are_cross_counted :: proc(t: ^testing.T) {
 	store_u16_bytes(data, 4100, 4) // index 4 does not exist with three normals
 	testing.expect_value(t, vert_normal_reason(data, 3072, 36), "the normal lump does not hold exactly the normals the indices use")
 }
+
+// build_phys_map builds a map with one model and one collision solid: the 16 byte
+// model header, the solid's record (size, VPHY, version, surface size), its key
+// text and the terminator.
+build_phys_map :: proc() -> []u8 {
+	data := make([]u8, 4096)
+	store_i32(data, 0, 0x50534256) // VBSP
+	store_i32(data, 4, 20)
+	models_offset := 1024
+	phys_offset := 2048
+	// Lump 14 (models): one 48 byte model, which is all the collision header needs.
+	store_i32(data, 8 + 14 * 16, i32(models_offset))
+	store_i32(data, 8 + 14 * 16 + 4, 48)
+	// Lump 29 (physcollide).
+	store_i32(data, 8 + 29 * 16, i32(phys_offset))
+	store_i32(data, 8 + 29 * 16 + 4, 84)
+	store_i32(data, phys_offset, 0)      // model index
+	store_i32(data, phys_offset + 4, 44) // collide size
+	store_i32(data, phys_offset + 8, 8)  // key size
+	store_i32(data, phys_offset + 12, 1) // solids
+	solid := phys_offset + 16
+	store_i32(data, solid, 40) // record size, without the size field itself
+	copy(data[solid + 4:solid + 8], "VPHY")
+	store_u16_bytes(data, solid + 8, 256) // collide version
+	store_u16_bytes(data, solid + 10, 0)  // model type
+	store_i32(data, solid + 12, 12)       // surface size: 40 - 28
+	copy(data[solid + 44:solid + 52], "solid {\x00")
+	term := phys_offset + 16 + 44 + 8
+	store_i32(data, term, -1)
+	return data
+}
+
+@(test)
+test_collision_solids_tile_their_model_blob :: proc(t: ^testing.T) {
+	data := build_phys_map()
+	defer delete(data)
+	testing.expect_value(t, phys_collide_reason(data, 2048, 84), "")
+
+	// A record that does not start with the magic is not a collide solid.
+	no_magic := build_phys_map()
+	defer delete(no_magic)
+	copy(no_magic[2048 + 20:2048 + 24], "XXXX")
+	testing.expect_value(t, phys_collide_reason(no_magic, 2048, 84), "a solid does not start with VPHY")
+
+	// A size that runs past the model's blob is caught by the walk.
+	long := build_phys_map()
+	defer delete(long)
+	store_i32(long, 2048 + 16, 48)
+	testing.expect_value(t, phys_collide_reason(long, 2048, 84), "a solid's size runs past its model blob")
+
+	// Two solids where the blob holds one: the chain cannot fill the blob.
+	two := build_phys_map()
+	defer delete(two)
+	store_i32(two, 2048 + 12, 2)
+	testing.expect_value(t, phys_collide_reason(two, 2048, 84), "a solid header does not fit its model blob")
+
+	// The surface size has to be the record length the corpus uses.
+	surface := build_phys_map()
+	defer delete(surface)
+	store_i32(surface, 2048 + 28, 0)
+	testing.expect_value(t, phys_collide_reason(surface, 2048, 84), "a solid's surface size does not match its length")
+
+	// A model the model lump does not have cannot own collision.
+	stray := build_phys_map()
+	defer delete(stray)
+	store_i32(stray, 2048, 7)
+	testing.expect_value(t, phys_collide_reason(stray, 2048, 84), "collision for a model the model lump does not have")
+
+	// The collide version is fixed in this build.
+	version := build_phys_map()
+	defer delete(version)
+	store_u16_bytes(version, 2048 + 16 + 8, 0)
+	testing.expect_value(t, phys_collide_reason(version, 2048, 84), "a solid carries an unknown collide version")
+}

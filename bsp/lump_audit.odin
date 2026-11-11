@@ -112,6 +112,12 @@ Lump_Audit :: struct {
 	lightmap_blocks:       int,
 	lightmap_attributed:   i64,
 	lightmap_total:        i64,
+	// The collision chain is walked solid by solid: these report what the walk
+	// covered, so the claim that the lump is understood and not skipped is a number
+	// on every run.
+	phys_models:  int,
+	phys_solids:  int,
+	phys_collide: i64,
 }
 
 // HEADER_BYTES is the ident, the version, the 64 lump descriptors and the map
@@ -146,6 +152,15 @@ audit_lumps :: proc(data: []u8) -> Lump_Audit {
 			result.lightmap_blocks += blocks
 			result.lightmap_attributed += attributed
 			result.lightmap_total += i64(length)
+		}
+		if i == LUMP_PHYSCOLLIDE || i == LUMP_PHYSCOLLIDESURFACE {
+			tally := PHYS_Tally{}
+			row.reason = phys_collide_reason(data, offset, length, &tally)
+			if row.reason == "" {
+				result.phys_models += tally.models
+				result.phys_solids += tally.solids
+				result.phys_collide += i64(tally.collide_bytes)
+			}
 		}
 		if i == LUMP_PAKFILE {
 			// The archive is checked as content, not as a span: the records have to
@@ -244,6 +259,10 @@ audit_lumps_text :: proc(a: ^Lump_Audit) -> string {
 		fmt.sbprintf(&b, "lightmaps:       %12d blocks, %d of %d bytes attributed to a face (%.1f%%)\n",
 			a.lightmap_blocks, a.lightmap_attributed, a.lightmap_total,
 			percent(a.lightmap_attributed, a.lightmap_total))
+	}
+	if a.phys_models > 0 {
+		fmt.sbprintf(&b, "collision:       %12d model(s), %d solid(s), %d bytes of collide data\n",
+			a.phys_models, a.phys_solids, a.phys_collide)
 	}
 	if a.pakfile_entries > 0 {
 		fmt.sbprintf(&b, "pakfile:         %12d entries, %d bytes of payload, %d CRC32 matched\n",
@@ -469,9 +488,31 @@ Lightmap_Block :: struct {
 // phys_collide_reason walks the per-model collision chain: a 16 byte header
 // (model index, collide size, key size, solid count), the blobs, and a terminator
 // whose model index is -1.
-phys_collide_reason :: proc(data: []u8, offset, length: int) -> string {
+//
+// The blobs are not taken on their declared length alone. Every model that carries
+// collision writes its solids as a chain of `{int size, "VPHY", short version,
+// short model type, int surface size, ...}` records, so the model's data size is the
+// sum of 4 + size over its solids and the walk has to land exactly on it. The magic,
+// the version (256 in every solid of the corpus) and the two header lengths the
+// records use (size - surface size is 12 or 28) say the chain is understood and not
+// merely skipped; the key data is the matching stack of solids as VMF text.
+PHYS_Tally :: struct {
+	models:        int,
+	solids:        int,
+	collide_bytes: int,
+}
+
+PHYS_SOLID_MAGIC :: "VPHY"
+PHYS_SOLID_VERSION :: 256
+PHYS_MODEL_STRIDE :: 48 // dmodel_t: mins, maxs, origin, headnode, firstface, numfaces
+
+phys_collide_reason :: proc(data: []u8, offset, length: int, tally: ^PHYS_Tally = nil) -> string {
 	pos := offset
 	end := offset + length
+	models_length := lump_int(data, LUMP_MODELS, 4)
+	num_models := models_length > 0 ? models_length / PHYS_MODEL_STRIDE : 0
+	seen := make(map[int]bool, 16, context.temp_allocator)
+	defer delete(seen)
 	for {
 		if pos + 16 > end {
 			return "truncated model header"
@@ -493,8 +534,63 @@ phys_collide_reason :: proc(data: []u8, offset, length: int) -> string {
 		if model < 0 || data_size < 0 || key_size < 0 || solids < 0 {
 			return "negative field in a model header"
 		}
+		if num_models > 0 && int(model) >= num_models {
+			return "collision for a model the model lump does not have"
+		}
+		if int(model) in seen {
+			return "a model carries two collision blocks"
+		}
+		seen[int(model)] = true
 		if pos + data_size + key_size > end {
 			return "model blobs past the lump"
+		}
+		if tally != nil {
+			tally.models += 1
+			tally.solids += int(solids)
+			tally.collide_bytes += data_size
+		}
+		// The solids chain has to tile the collide blob.
+		at := pos
+		blob_end := pos + data_size
+		for _ in 0 ..< int(solids) {
+			if at + 16 > blob_end {
+				return "a solid header does not fit its model blob"
+			}
+			size := int(read_i32(data, at))
+			if size <= 0 || at + 4 + size > blob_end {
+				return "a solid's size runs past its model blob"
+			}
+			if string(data[at + 4:at + 8]) != PHYS_SOLID_MAGIC {
+				return "a solid does not start with VPHY"
+			}
+			if int(read_u16(data, at + 8)) != PHYS_SOLID_VERSION {
+				return "a solid carries an unknown collide version"
+			}
+			delta := size - int(read_i32(data, at + 12))
+			if delta != 12 && delta != 28 {
+				return "a solid's surface size does not match its length"
+			}
+			at += 4 + size
+		}
+		if at != blob_end {
+			return "the solids do not fill their model blob"
+		}
+		if solids == 0 && data_size != 0 {
+			return "a model without solids carries collide data"
+		}
+		if key_size > 0 {
+			key := data[pos + data_size:pos + data_size + key_size]
+			if key[len(key) - 1] != 0 {
+				return "the key data does not end with a terminator"
+			}
+			for byte in key {
+				if byte == 0 {
+					break
+				}
+				if byte != '\n' && byte != '\r' && byte != '\t' && (byte < 0x20 || byte > 0x7e) {
+					return "the key data is not text"
+				}
+			}
 		}
 		pos += data_size + key_size
 	}
