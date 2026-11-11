@@ -8,6 +8,7 @@
 package bsp
 
 import "core:fmt"
+import "core:math"
 import "core:slice"
 import "core:sort"
 import "core:strings"
@@ -115,6 +116,12 @@ Lump_Audit :: struct {
 	lightmap_total:        i64,
 	lightmap_tiled:        int, // lighting lumps whose face regions tile them exactly
 	lightmap_lumps:        int, // lighting lumps present
+	// The luxels of the regions that tiled: how many were decoded, and the range of
+	// their shared exponents. A luxel outside the range any face of the corpus uses is
+	// a region read at the wrong offset even when its length is right.
+	lightmap_luxels:       i64,
+	lightmap_exp_min:      i32,
+	lightmap_exp_max:      i32,
 	// The collision chain is walked solid by solid: these report what the walk
 	// covered, so the claim that the lump is understood and not skipped is a number
 	// on every run.
@@ -153,11 +160,25 @@ audit_lumps :: proc(data: []u8) -> Lump_Audit {
 		if i == LUMP_LIGHTING || i == LUMP_LIGHTING_HDR {
 			result.lightmap_lumps += 1
 			tiles, regions, covered, total := lightmap_tiling(data, i)
+			faces_lump := LUMP_FACES
+			if i == LUMP_LIGHTING_HDR {
+				faces_lump = LUMP_FACES_HDR
+			}
 			if tiles {
 				result.lightmap_blocks += regions
 				result.lightmap_attributed += covered
 				result.lightmap_total += total
 				result.lightmap_tiled += 1
+				luxels, low, high := lightmap_luxel_range(data, i, faces_lump, lightmap_extra_plane(data))
+				result.lightmap_luxels += luxels
+				if luxels > 0 {
+					if result.lightmap_exp_min == 0 || low < result.lightmap_exp_min {
+						result.lightmap_exp_min = low
+					}
+					if high > result.lightmap_exp_max {
+						result.lightmap_exp_max = high
+					}
+				}
 			} else {
 				blocks, attributed := lightmap_coverage(data, i)
 				result.lightmap_blocks += blocks
@@ -272,6 +293,10 @@ audit_lumps_text :: proc(a: ^Lump_Audit) -> string {
 			a.lightmap_blocks, a.lightmap_attributed, a.lightmap_total,
 			percent(a.lightmap_attributed, a.lightmap_total),
 			a.lightmap_tiled, a.lightmap_lumps)
+		if a.lightmap_luxels > 0 {
+			fmt.sbprintf(&b, "                 %d luxels decoded, exponents %d..%d\n",
+				a.lightmap_luxels, a.lightmap_exp_min, a.lightmap_exp_max)
+		}
 	}
 	if a.phys_models > 0 {
 		fmt.sbprintf(&b, "collision:       %12d model(s), %d solid(s), %d bytes of collide data\n",
@@ -558,6 +583,102 @@ lightmap_tiling :: proc(data: []u8, index: int) -> (ok: bool, regions: int, cove
 		return false, regions, covered, total
 	}
 	return true, regions, covered, total
+}
+
+// Lightmap_Luxel is one lightmap sample: three colour channels and a shared exponent.
+// The engine turns the bytes into floats with `channel * 2^exponent / 255`, where the
+// exponent byte is read as a signed char and the table it indexes is a plain
+// 2^e/255 (engine.dll FUN_1800ce4f0 reads `(&DAT_18047e280)[*pcVar8]` with a `char`
+// pointer, and the 256 floats that table addresses are exactly 2^e/255 for e < 0 when
+// the base is taken 512 bytes lower). Decompiled, not guessed.
+Lightmap_Luxel :: struct {
+	r, g, b: f32,
+	exponent: i32,
+}
+
+lightmap_luxel_decode :: proc(bytes: []u8) -> (luxel: Lightmap_Luxel) {
+	if len(bytes) < 4 {
+		return
+	}
+	e := i32(i8(bytes[3]))
+	scale := f32(1.0) / 255.0
+	// 2^e without a table; e stays in the range a byte can express.
+	scale = f32(math.ldexp(1.0, int(e))) / 255.0
+	luxel = Lightmap_Luxel {
+		r        = f32(bytes[0]) * scale,
+		g        = f32(bytes[1]) * scale,
+		b        = f32(bytes[2]) * scale,
+		exponent = e,
+	}
+	return
+}
+
+// lightmap_luxel_range decodes every luxel of the regions that tile a lighting lump and
+// returns how many there are and the range of their exponents.
+//
+// The luxel is four bytes: three colour channels and a shared exponent, and the engine
+// turns the byte into a float with a 256-entry table of 2^e/255 whose exponent is a
+// signed char (decompiled: engine.dll FUN_1800ce4f0 indexes `(&DAT_18047e280)[*pcVar8]`
+// with a `char`). The table measured from the binary is exactly 2^e/255 for every e it
+// covers, so no table is needed here: the exponent is what is checked, and its range is
+// what a misread region cannot fake.
+lightmap_luxel_range :: proc(data: []u8, index, faces_lump: int, extra: int) -> (luxels: i64, low: i32, high: i32) {
+	faces_offset := lump_int(data, faces_lump, 0)
+	faces_length := lump_int(data, faces_lump, 4)
+	length := lump_int(data, index, 4)
+	offset := lump_int(data, index, 0)
+	if faces_length <= 0 || length <= 0 {
+		return
+	}
+	low = 0
+	first := true
+	for i in 0 ..< faces_length / 56 {
+		face := faces_offset + i * 56
+		light_offset := int(read_i32(data, face + 20))
+		if light_offset < 0 {
+			continue
+		}
+		size_x := int(read_i32(data, face + 36))
+		size_y := int(read_i32(data, face + 40))
+		if size_x < 0 || size_y < 0 {
+			continue
+		}
+		styles := 0
+		for s in 0 ..< 4 {
+			if data[face + 16 + s] != 0xff {
+				styles += 1
+			}
+		}
+		if styles == 0 {
+			styles += 1
+		}
+		planes := lightmap_planes_of(data, face) + extra
+		per_style := i64(size_x + 1) * i64(size_y + 1) * i64(planes) * 4
+		// lightofs points at the first sample, not at the four byte word that opens
+		// the region: the engine reads its luxels straight from `surf->samples`
+		// (decompiled R_BuildLightMap), so the word sits before the samples it belongs
+		// to. Every style after the first repeats the pattern: its word, then its
+		// samples.
+		cursor := light_offset
+		for _ in 0 ..< styles {
+			if cursor + int(per_style) > length { // cursor is lump relative, not absolute
+				return luxels, low, high
+			}
+			for l in 0 ..< int(per_style / 4) {
+				e := i32(i8(data[offset + cursor + l * 4 + 3]))
+				if first || e < low {
+					low = e
+					first = false
+				}
+				if e > high {
+					high = e
+				}
+			}
+			luxels += per_style / 4
+			cursor += 4 + int(per_style)
+		}
+	}
+	return
 }
 
 // lighting_reason checks the lightmap sample array against the faces that point

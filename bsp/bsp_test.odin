@@ -815,3 +815,49 @@ test_lightmap_regions_tile_the_lump :: proc(t: ^testing.T) {
 	// The four planes are measured even when the region no longer fits the lump.
 	testing.expect_value(t, covered4, i64(4 * 3 * 4 * 4))
 }
+
+// A lightmap luxel is three colour bytes and a shared signed exponent; the engine
+// scales each channel by 2^e/255 (decompiled from engine.dll FUN_1800ce4f0). The sign
+// is the part that a reader gets wrong: 0xFE is -2, not 254.
+@(test)
+test_a_lightmap_luxel_decodes_its_signed_exponent :: proc(t: ^testing.T) {
+	luxel := lightmap_luxel_decode([]u8{255, 128, 64, 0})
+	testing.expectf(t, abs(luxel.r - 1.0) < 1e-6, "255 with exponent 0 is one, got %f", luxel.r)
+	testing.expectf(t, abs(luxel.g - f32(128.0 / 255.0)) < 1e-6, "got %f", luxel.g)
+	testing.expect_value(t, luxel.exponent, i32(0))
+
+	dark := lightmap_luxel_decode([]u8{255, 0, 0, 0xFE})
+	testing.expect_value(t, dark.exponent, i32(-2))
+	testing.expectf(t, abs(dark.r - 0.25) < 1e-6, "255 with exponent -2 is a quarter, got %f", dark.r)
+
+	black := lightmap_luxel_decode([]u8{0, 0, 0, 0})
+	testing.expect_value(t, black.r, f32(0))
+}
+
+// The region decoder has to find exactly the luxels of the face, at the offset the
+// face names, and nothing else.
+@(test)
+test_lightmap_luxels_are_counted_from_the_face :: proc(t: ^testing.T) {
+	data := build_light_tile_map(2, 3)
+	defer delete(data)
+	// Three luxels of a 2x3 face carry exponent -2, the rest exponent 1.
+	light_offset := 3072
+	store_i32(data, 8 + 8 * 16 + 4, 4 + 4 * 3 * 4)
+	for l in 0 ..< 12 {
+		data[light_offset + 4 + l * 4 + 3] = u8(1)
+	}
+	for l in 0 ..< 3 {
+		data[light_offset + 4 + l * 4 + 3] = u8(0xFE)
+	}
+	luxels, low, high := lightmap_luxel_range(data, 8, 7, 0)
+	testing.expect_value(t, luxels, i64(12))
+	testing.expect_value(t, low, i32(-2))
+	testing.expect_value(t, high, i32(1))
+
+	// A face whose region does not fit the lump yields no luxels rather than reading on.
+	data2 := build_light_tile_map(2, 3)
+	defer delete(data2)
+	store_i32(data2, 8 + 8 * 16 + 4, 4 + 4 * 3 * 4 - 4)
+	luxels2, _, _ := lightmap_luxel_range(data2, 8, 7, 0)
+	testing.expect_value(t, luxels2, i64(0))
+}
