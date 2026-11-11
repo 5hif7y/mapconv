@@ -161,10 +161,7 @@ audit_lumps :: proc(data: []u8) -> Lump_Audit {
 		if i == LUMP_LIGHTING || i == LUMP_LIGHTING_HDR {
 			result.lightmap_lumps += 1
 			tiles, regions, covered, total, extra_planes := lightmap_tiling(data, i)
-			faces_lump := LUMP_FACES
-			if i == LUMP_LIGHTING_HDR {
-				faces_lump = LUMP_FACES_HDR
-			}
+			faces_lump := lightmap_faces_lump(data, i)
 			if tiles {
 				result.lightmap_blocks += regions
 				result.lightmap_attributed += covered
@@ -442,10 +439,7 @@ lump_reason :: proc(data: []u8, index, offset, length: int) -> string {
 // lightmap_coverage counts the face blocks of one lightmap lump and the bytes they
 // claim, which is how the audit reports how much of the lump the faces explain.
 lightmap_coverage :: proc(data: []u8, index: int) -> (blocks: int, attributed: i64) {
-	faces_lump := LUMP_FACES
-	if index == LUMP_LIGHTING_HDR {
-		faces_lump = LUMP_FACES_HDR
-	}
+	faces_lump := lightmap_faces_lump(data, index)
 	faces_offset := lump_int(data, faces_lump, 0)
 	faces_length := lump_int(data, faces_lump, 4)
 	if faces_length <= 0 || faces_offset <= 0 {
@@ -476,6 +470,16 @@ lightmap_coverage :: proc(data: []u8, index: int) -> (blocks: int, attributed: i
 		attributed += i64((size_x + 1) * (size_y + 1) * 4) * i64(planes) * i64(styles)
 	}
 	return
+}
+
+// lightmap_faces_lump is the face array a lighting lump is indexed by. Both lumps are
+// pointed at by the same faces: lump 58 exists in later formats and is empty in most of
+// this corpus, so it is used only when it carries faces of its own.
+lightmap_faces_lump :: proc(data: []u8, index: int) -> int {
+	if index == LUMP_LIGHTING_HDR && lump_int(data, LUMP_FACES_HDR, 4) > 0 {
+		return LUMP_FACES_HDR
+	}
+	return LUMP_FACES
 }
 
 // lightmap_planes_of returns the lighting planes a face carries: one, or four when
@@ -533,10 +537,7 @@ lightmap_tiling :: proc(data: []u8, index: int) -> (ok: bool, regions: int, cove
 }
 
 lightmap_tiling_with :: proc(data: []u8, index: int, extra: int) -> (ok: bool, regions: int, covered: i64, total: i64) {
-	faces_lump := LUMP_FACES
-	if index == LUMP_LIGHTING_HDR {
-		faces_lump = LUMP_FACES_HDR
-	}
+	faces_lump := lightmap_faces_lump(data, index)
 	faces_offset := lump_int(data, faces_lump, 0)
 	faces_length := lump_int(data, faces_lump, 4)
 	length := lump_int(data, index, 4)
@@ -716,10 +717,7 @@ lighting_reason :: proc(data: []u8, index, offset, length: int) -> string {
 	if length % 4 != 0 {
 		return "size is not a multiple of 4"
 	}
-	faces_lump := LUMP_FACES
-	if index == LUMP_LIGHTING_HDR {
-		faces_lump = LUMP_FACES_HDR
-	}
+	faces_lump := lightmap_faces_lump(data, index)
 	base := 8 + faces_lump * 16
 	faces_offset := int(read_i32(data, base))
 	faces_length := int(read_i32(data, base + 4))
