@@ -71,7 +71,7 @@ read_fractured_static_mesh :: proc(
 	// The fragment array: count, then the records up to the tail.
 	r := Reader{data = pkg.data, pos = base.body_end, limit = tail_start}
 	count := read_i32(&r)
-	if r.failed || count < 0 || count > 10_000 {
+	if r.failed || count <= 0 || count > 10_000 {
 		diag.err(&d, "ue3.bad-fractured", fmt.aprintf("implausible fragment count %d", count))
 		return
 	}
@@ -86,6 +86,19 @@ read_fractured_static_mesh :: proc(
 	t := Reader{data = pkg.data, pos = tail_start, limit = head.end_offset}
 	mesh.core_index = read_i32(&t)
 	mesh.interior_index = read_i32(&t)
+	// CoreFragmentIndex is an index into the fragment array (or -1 for none), and the
+	// interior element index is an element of the mesh (or -1). Both hold in the two
+	// fractured meshes of the corpus; the second is the only field of the tail that
+	// can contradict the count read before it.
+	if mesh.core_index < -1 || (mesh.core_index >= 0 && int(mesh.core_index) >= mesh.fragments) {
+		diag.err(&d, "ue3.bad-fractured",
+			fmt.aprintf("core fragment %d is not one of the %d fragments", mesh.core_index, mesh.fragments))
+		return
+	}
+	if mesh.interior_index < -1 {
+		diag.err(&d, "ue3.bad-fractured", fmt.aprintf("interior element index %d is negative", mesh.interior_index))
+		return
+	}
 	for _ in 0 ..< 12 {
 		value := read_f32(&t)
 		if !(value == value) || math.abs(value) > 1e12 {
