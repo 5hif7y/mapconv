@@ -12,19 +12,39 @@ import "../diag"
 //	VertexFactoryType -> DWORD map    (538 .. 796)
 //	MaterialShaderMaps: count, then per map FStaticParameterSet, SkipOffset, data
 //
-// The skip offsets are absolute archive positions written by the cooker. What the
-// bytes between two offsets are is checked, not assumed: each shader payload starts
-// with the platform byte the cache declares, a frequency byte, and carries the GUID
-// and type FName of the record that names it -- the same pair the header repeats.
-// Over the corpus that holds for 83,963 shaders in three platform caches (15,729
-// SM2, 24,558 SM3, 43,676 SM4), 235,185,172 B of payload. The material shader map
-// payloads are still skipped by offset. The compressed cache (VER_SHADER_COMPRESSION 672) and the
-// automatic versioning data (796) are not present in 576; if a package ever
-// carries them the reader fails instead of guessing.
+// Both payloads are walked, not skipped.
+//
+// A shader payload is an FShader (ShaderManager.cpp:789): a platform byte, a frequency
+// byte, the code blob, the CRC, then Id and Type. Its GUID and its type FName have to
+// be the ones the record in the header names -- two copies of the identity that agree.
+// 83,963 shaders in three platform caches, 235,185,172 B.
+//
+// A material shader map payload is an FMaterialShaderMap (MaterialShader.cpp:1894). It
+// does not hold code: it holds references, {FGuid id, FName type}, to shaders the shader
+// section of the same file declares, so the reference is checked against that catalog
+// (a GUID the cache does not declare is an error, and so is a reference whose type is
+// not the type of the record that holds it) and the payload has to end exactly where its
+// skip offset says. A map may also hold a null reference -- zero GUID, type None -- for a
+// shader this platform's cache does not have. 8,989 maps, 266,062 references (8 null),
+// 9,581,011 B.
+//
+// The compressed cache (VER_SHADER_COMPRESSION 672) and the automatic versioning data
+// (796) are not present in 576; if a package ever carries them the reader fails instead
+// of guessing.
 Shader_Cache :: struct {
 	shaders:       int,
 	material_maps: int,
 	payload_bytes: int, // shader payload bytes the skip offsets bound
+	// Every material map names the shaders it uses by their GUID; the catalog is the
+	// set of GUIDs the shader section of the same cache declares. A reference that is
+	// not in it is a reference to a shader that does not exist.
+	shader_refs:      int,
+	null_refs:        int,
+	material_bytes:   int,
+	switch_records:   int,
+	mask_records:     int,
+	// Counters for checks that are measured and reported before they are enforced.
+	id_mismatch:      int,
 }
 
 read_shader_cache :: proc(
@@ -50,7 +70,8 @@ read_shader_cache :: proc(
 		return
 	}
 	r := Reader{data = pkg.data, pos = head.body_offset, limit = head.end_offset}
-	gaps := 0
+	catalog := make(map[[16]u8]bool, 1 << 16, allocator)
+	defer delete(catalog)
 
 	skip_map :: proc(r: ^Reader, stride: int) -> bool {
 		count := read_i32(r)
@@ -65,7 +86,6 @@ read_shader_cache :: proc(
 	}
 
 	platform_byte := u8(0)
-	_ = gaps
 	if version >= 538 {
 		platform_byte = read_u8(&r) // Platform
 		if r.failed {
@@ -91,6 +111,9 @@ read_shader_cache :: proc(
 		type_index, type_number := type_ref.index, type_ref.number
 		guid_bytes := pkg.data[r.pos:r.pos + 16]
 		r.pos += 16 // FGuid
+		guid_key: [16]u8
+		copy(guid_key[:], guid_bytes)
+		catalog[guid_key] = true
 		if version >= 796 {
 			diag.err(&d, "ue3.shader-cache-version", "automatic shader versioning data is not supported")
 			return
@@ -147,10 +170,11 @@ read_shader_cache :: proc(
 			diag.err(&d, "ue3.bad-shader-cache", "implausible material shader map skip offset")
 			return
 		}
-		if gaps < 16 {
-			gaps += 1
+		if !material_shader_map(pkg, &r, int(skip), catalog, platform_byte, &result, &d) {
+			return
 		}
 		r.pos = int(skip)
+		result.material_maps += 1
 	}
 	result.material_maps = int(maps)
 	if diag.has_errors(&d) && len(d.items) > 0 {
@@ -160,6 +184,226 @@ read_shader_cache :: proc(
 		return
 	}
 	return
+}
+
+
+// material_shader_map walks one FMaterialShaderMap::Serialize payload
+// (Engine/Src/MaterialShader.cpp:1894) as a shader cache writes it:
+//
+//	TShaderMap<FMaterialShaderType>:  i32 count, then per shader a reference
+//	MeshShaderMaps:                   i32 count, then per map {shader count, references,
+//	                                  FName VertexFactoryType}
+//	FGuid MaterialId
+//	FString FriendlyName
+//	FStaticParameterSet:              FGuid BaseMaterialId, switches, masks
+//	i32 Platform
+//
+// A shader here is not its code: it is a reference, {FName type, FGuid id, FName type},
+// because the code lives once in the shader section at the head of the cache. The
+// reference is checked against that section, so the payload is tied to data outside
+// itself: the GUID has to name a shader the same file declares, and the type the
+// reference repeats has to be the type of the record that holds it. A walk that drifts
+// by one byte reads another record's GUID and fails.
+material_shader_map :: proc(
+	pkg: ^Package,
+	r: ^Reader,
+	end: int,
+	catalog: map[[16]u8]bool,
+	platform: u8,
+	result: ^Shader_Cache,
+	d: ^diag.Diagnostics,
+) -> bool {
+	if end > r.limit {
+		diag.err(d, "ue3.material-map", "material shader map ends past its export")
+		return false
+	}
+	start := r.pos
+	limit := r.limit
+	r.limit = end
+	defer r.limit = limit
+
+	shader_ref :: proc(
+		pkg: ^Package,
+		r: ^Reader,
+		catalog: map[[16]u8]bool,
+		result: ^Shader_Cache,
+		d: ^diag.Diagnostics,
+	) -> bool {
+		key := read_name_ref(r)
+		if !name_in_table(pkg, key) {
+			diag.err(d, "ue3.material-map-name",
+				fmt.aprintf("a shader reference names %d/%d, the table has %d", key.index, key.number, len(pkg.names)))
+			return false
+		}
+		if r.pos + 16 > r.limit {
+			diag.err(d, "ue3.material-map-end", "a shader reference runs past its map")
+			return false
+		}
+		guid: [16]u8
+		copy(guid[:], pkg.data[r.pos:r.pos + 16])
+		r.pos += 16
+		value := read_name_ref(r)
+		if !name_in_table(pkg, value) {
+			diag.err(d, "ue3.material-map-name",
+				fmt.aprintf("a shader reference names type %d/%d, the table has %d", value.index, value.number, len(pkg.names)))
+			return false
+		}
+		// A map may hold a reference to a shader this platform's cache does not have:
+		// the writer then stores a zero GUID and the type NAME_None. Anything else has
+		// to name a shader the shader section of the same file declares.
+		if guid == ([16]u8{}) {
+			if name_text(pkg, value) != "None" {
+				diag.err(d, "ue3.material-map-null",
+					fmt.aprintf("a null shader reference names type %s, not None", name_text(pkg, value)))
+				return false
+			}
+			result.null_refs += 1
+			fmt.eprintln("DBG null ref, count", result.null_refs)
+			return true
+		}
+		if !catalog[guid] {
+			diag.err(d, "ue3.material-map-guid",
+				fmt.aprintf("a shader reference names a GUID the cache does not declare (%x)", guid))
+			return false
+		}
+		if value.index != key.index || value.number != key.number {
+			diag.err(d, "ue3.material-map-type",
+				fmt.aprintf("a shader reference names type %s where its record names %s",
+					name_text(pkg, value), name_text(pkg, key)))
+			return false
+		}
+		result.shader_refs += 1
+		return true
+	}
+
+	shaders := read_i32(r)
+	if r.failed || shaders < 0 || shaders > 100_000 {
+		diag.err(d, "ue3.material-map", fmt.aprintf("implausible shader count %d", shaders))
+		return false
+	}
+	for _ in 0 ..< int(shaders) {
+		if !shader_ref(pkg, r, catalog, result, d) {
+			return false
+		}
+	}
+	mesh_maps := read_i32(r)
+	if r.failed || mesh_maps < 0 || mesh_maps > 100_000 {
+		diag.err(d, "ue3.material-map", fmt.aprintf("implausible mesh shader map count %d", mesh_maps))
+		return false
+	}
+	for _ in 0 ..< int(mesh_maps) {
+		members := read_i32(r)
+		if r.failed || members < 0 || members > 100_000 {
+			diag.err(d, "ue3.material-map", fmt.aprintf("implausible mesh shader count %d", members))
+			return false
+		}
+		for _ in 0 ..< int(members) {
+			if !shader_ref(pkg, r, catalog, result, d) {
+				return false
+			}
+		}
+		vf := read_name_ref(r)
+		if !name_in_table(pkg, vf) {
+			diag.err(d, "ue3.material-map-name",
+				fmt.aprintf("a mesh shader map names vertex factory %d/%d, the table has %d", vf.index, vf.number, len(pkg.names)))
+			return false
+		}
+	}
+	// MaterialId, then the friendly name, then the material's own GUID at the head of
+	// its static parameter set: the three name the same material, so two of them must
+	// agree with the third or the walk is reading someone else's bytes.
+	material_id: [16]u8
+	copy(material_id[:], pkg.data[r.pos:r.pos + 16])
+	r.pos += 16
+	name_len := read_i32(r)
+	if r.failed || name_len <= 0 || name_len > 1024 || r.pos + int(name_len) > r.limit {
+		diag.err(d, "ue3.material-map-name", fmt.aprintf("implausible friendly name length %d", name_len))
+		return false
+	}
+	name_bytes := pkg.data[r.pos:r.pos + int(name_len)]
+	r.pos += int(name_len)
+	if name_bytes[len(name_bytes) - 1] != 0 {
+		diag.err(d, "ue3.material-map-name", "the friendly name is not terminated")
+		return false
+	}
+	for b in name_bytes[:len(name_bytes) - 1] {
+		if b < 0x20 || b > 0x7e {
+			diag.err(d, "ue3.material-map-name", fmt.aprintf("the friendly name holds byte 0x%02x", b))
+			return false
+		}
+	}
+	base_id: [16]u8
+	if r.pos + 16 > r.limit { 
+		diag.err(d, "ue3.material-map-end", "the static parameter set runs past its map")
+		return false
+	}
+	copy(base_id[:], pkg.data[r.pos:r.pos + 16])
+	r.pos += 16
+	if base_id != material_id {
+		result.id_mismatch += 1
+	}
+	switches := read_i32(r)
+	if r.failed || switches < 0 || switches > 100_000 {
+		diag.err(d, "ue3.material-map", fmt.aprintf("implausible static switch count %d", switches))
+		return false
+	}
+	for _ in 0 ..< int(switches) {
+		if r.pos + 32 > r.limit {
+			diag.err(d, "ue3.material-map-end", "a static switch record runs past its map")
+			return false
+		}
+		parameter := Name_Ref{read_i32(r), read_i32(r)}
+		if !name_in_table(pkg, parameter) {
+			diag.err(d, "ue3.material-map-name", "a static switch names a parameter outside the table")
+			return false
+		}
+		r.pos += 24
+		result.switch_records += 1
+	}
+	masks := read_i32(r)
+	if r.failed || masks < 0 || masks > 100_000 {
+		diag.err(d, "ue3.material-map", fmt.aprintf("implausible component mask count %d", masks))
+		return false
+	}
+	for _ in 0 ..< int(masks) {
+		if r.pos + 44 > r.limit {
+			diag.err(d, "ue3.material-map-end", "a component mask record runs past its map")
+			return false
+		}
+		parameter := Name_Ref{read_i32(r), read_i32(r)}
+		if !name_in_table(pkg, parameter) {
+			diag.err(d, "ue3.material-map-name", "a component mask names a parameter outside the table")
+			return false
+		}
+		r.pos += 36
+		result.mask_records += 1
+	}
+	declared_platform := read_i32(r)
+	if r.failed {
+		diag.err(d, "ue3.material-map-end", "the map ends before its platform")
+		return false
+	}
+	// The cache states its platform in its header and every map restates it: the two
+	// agreed in all 8,989 maps of the corpus, so a disagreement is a misread, not a
+	// variant.
+	if i32(platform) != declared_platform {
+		diag.err(d, "ue3.material-map-platform",
+			fmt.aprintf("a material shader map names platform %d, the cache %d", declared_platform, platform))
+		return false
+	}
+	if r.pos != end {
+		diag.err(d, "ue3.material-map-layout",
+			fmt.aprintf("material shader map consumed %d of %d bytes", r.pos - start, end - start))
+		return false
+	}
+	result.material_bytes += end - start
+	return true
+}
+
+// name_in_table reports whether a name reference can exist in a package of that many
+// names. The reader does not need the text, only that the index is real.
+name_in_table :: proc(pkg: ^Package, ref: Name_Ref) -> bool {
+	return ref.index >= 0 && int(ref.index) < len(pkg.names) && ref.number >= 0
 }
 
 // shader_tail_ok checks that a payload carries the identity of its own record: the

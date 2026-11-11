@@ -39,6 +39,13 @@ Audit :: struct {
 	streamed:    i64,
 	rows:        [dynamic]Audit_Row,
 	objects:     [dynamic]Audit_Object,
+	// Shader cache totals: the material shader maps and the references they hold, so
+	// the audit states what was walked and not only that the bytes were consumed.
+	shader_maps:      int,
+	shader_refs:      int,
+	shader_nulls:     int,
+	shader_map_bytes: int,
+	shader_id_mismatch:       int,
 }
 
 audit_row :: proc(audit: ^Audit, class_name: string, allocator := context.allocator) -> ^Audit_Row {
@@ -381,9 +388,14 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 			}
 			delete(pcd_d.items)
 		case "ShaderCache":
-			_, scache_d := read_shader_cache(pkg, index, allocator)
+			scache, scache_d := read_shader_cache(pkg, index, allocator)
 			if !diag.has_errors(&scache_d) {
 				interpreted = i64(e.serial_size)
+				audit.shader_maps += scache.material_maps
+				audit.shader_refs += scache.shader_refs
+				audit.shader_nulls += scache.null_refs
+				audit.shader_map_bytes += scache.material_bytes
+				audit.shader_id_mismatch += scache.id_mismatch
 			} else if len(scache_d.items) > 0 && detail == "" {
 				detail = scache_d.items[0].message
 			}
@@ -637,6 +649,14 @@ audit_text :: proc(audit: ^Audit) -> string {
 	}
 	fmt.sbprintf(&b, "credited:        %d (%.1f%% of file, payload + tables)\n", credited, pct(credited, audit.file_size))
 	fmt.sbprintf(&b, "uninterpreted:   %d (%.1f%%)\n", audit.file_size - credited, pct(audit.file_size - credited, audit.file_size))
+	if audit.shader_maps > 0 {
+		fmt.sbprintf(&b, "shader maps:     %d map(s), %d shader reference(s) (%d null), %d bytes",
+			audit.shader_maps, audit.shader_refs, audit.shader_nulls, audit.shader_map_bytes)
+		if audit.shader_id_mismatch > 0 {
+			fmt.sbprintf(&b, " (%d map(s) whose material id differs from its parameter set)", audit.shader_id_mismatch)
+		}
+		strings.write_byte(&b, '\n')
+	}
 	if audit.streamed > 0 {
 		fmt.sbprintf(&b, "streamed mips:   %d bytes referenced outside the file\n", audit.streamed)
 	}
