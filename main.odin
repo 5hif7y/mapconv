@@ -110,6 +110,12 @@ main :: proc() {
 		return
 	}
 
+	// verify reads its own files, and a tree of them, so it also goes before the read.
+	if args.command == "verify" {
+		run_verify(args)
+		return
+	}
+
 	contents, read_err := os.read_entire_file(args.input, context.allocator)
 	if read_err != nil {
 		fmt.eprintfln("mapconv: cannot read %q", args.input)
@@ -218,7 +224,7 @@ parse_args :: proc(argv: []string) -> (args: Args, ok: bool) {
 		}
 		i += 1
 	}
-	if args.input == "" && !(args.command == "audit" && args.corpus != "") {
+	if args.input == "" && !((args.command == "audit" || args.command == "verify") && args.corpus != "") {
 		fmt.eprintln("mapconv: --input is required")
 		return args, false
 	}
