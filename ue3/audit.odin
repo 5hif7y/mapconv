@@ -373,10 +373,11 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 			}
 			delete(font_d.items)
 		case "PersistentCookerData":
-			pcd_res, pcd_d := read_persistent_cooker_data(pkg, index, allocator)
-			fmt.eprintln("DBG pcd", pcd_res.bulk_infos, pcd_res.file_times)
+			_, pcd_d := read_persistent_cooker_data(pkg, index, allocator)
 			if !diag.has_errors(&pcd_d) {
 				interpreted = i64(e.serial_size)
+			} else if len(pcd_d.items) > 0 && detail == "" {
+				detail = pcd_d.items[0].message
 			}
 			delete(pcd_d.items)
 		case "ShaderCache":
