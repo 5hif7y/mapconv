@@ -507,6 +507,18 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 	return
 }
 
+// audit_names_text prints the name table with its indices. A structure that names
+// something -- a shader type, a material property -- keeps an index into this table,
+// so decoding one starts by being able to read the index.
+audit_names_text :: proc(pkg: ^Package) -> string {
+	b := strings.builder_make()
+	fmt.sbprintf(&b, "\nnames (%d):\n", len(pkg.names))
+	for name, i in pkg.names {
+		fmt.sbprintf(&b, "  %5d %s\n", i, name.text)
+	}
+	return strings.to_string(b)
+}
+
 // audit_dump_text prints the object head of every export: the offsets, the
 // tagged properties and the first bytes of the native body. It is the probe for
 // layouts that do not match the reader (a truncated texture, a mystery prefix).

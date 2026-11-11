@@ -50,6 +50,11 @@ Options:
   --quiet              only print errors
   --no-materials       skip the per-material notes
 
+audit only:
+  --objects            list every export with a residual, largest first
+  --dump               print each export's head and the first bytes of its body
+  --names              print the package name table with its indices
+
 Supported formats:
   vmf   Source 1 Valve Map Format (text)
   bsp   Source 1 compiled map (import only)
@@ -72,6 +77,7 @@ Args :: struct {
 	quiet:    bool,
 	objects:  bool,
 	dump:     bool,
+	names:    bool,
 	materials: bool,
 	ok:       bool,
 }
@@ -176,6 +182,8 @@ parse_args :: proc(argv: []string) -> (args: Args, ok: bool) {
 			args.objects = true
 		case "--dump":
 			args.dump = true
+		case "--names":
+			args.names = true
 		case "--quiet":
 			args.quiet = true
 		case "--no-materials":
@@ -607,6 +615,9 @@ run_audit :: proc(args: Args, text: string) {
 	}
 	if args.dump {
 		fmt.print(ue3.audit_dump_text(&pkg))
+	}
+	if args.names {
+		fmt.print(ue3.audit_names_text(&pkg))
 	}
 	print_diagnostics(&diagnostics, args.quiet, args.report)
 	_ = audit_d
