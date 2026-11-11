@@ -746,3 +746,72 @@ test_visibility_bits_are_counted_against_the_leaves :: proc(t: ^testing.T) {
 	defer delete(padded)
 	testing.expect_value(t, visibility_reason(padded, 2048, 24), "a bit vector sets bits past the last cluster")
 }
+
+// build_light_tile_map builds a map with one face, the texinfo and the lighting lump
+// its region needs: four bytes of prefix, then the samples of one plane.
+build_light_tile_map :: proc(size_x, size_y: i32) -> []u8 {
+	data := make([]u8, 4096)
+	store_i32(data, 0, 0x50534256) // VBSP
+	store_i32(data, 4, 20)
+	faces_offset := 1024
+	texinfo_offset := 2048
+	light_offset := 3072
+	span := i32((size_x + 1) * (size_y + 1) * 4)
+	// Lump 7 (faces): one 56 byte face pointing at lightofs 4.
+	store_i32(data, 8 + 7 * 16, i32(faces_offset))
+	store_i32(data, 8 + 7 * 16 + 4, 56)
+	store_i16_bytes(data, faces_offset + 10, 0) // texinfo 0
+	data[faces_offset + 16] = 0                 // one style
+	data[faces_offset + 17] = 0xff
+	data[faces_offset + 18] = 0xff
+	data[faces_offset + 19] = 0xff
+	store_i32(data, faces_offset + 20, 4) // lightofs
+	store_i32(data, faces_offset + 36, size_x)
+	store_i32(data, faces_offset + 40, size_y)
+	// Lump 6 (texinfo): one record, flags without the bump bit.
+	store_i32(data, 8 + 6 * 16, i32(texinfo_offset))
+	store_i32(data, 8 + 6 * 16 + 4, 72)
+	// Lump 8 (lighting): the region of that face and nothing else.
+	store_i32(data, 8 + 8 * 16, i32(light_offset))
+	store_i32(data, 8 + 8 * 16 + 4, 4 + span)
+	return data
+}
+
+store_i16_bytes :: proc(data: []u8, offset: int, value: i16) {
+	store_u16_bytes(data, offset, u16(value))
+}
+
+@(test)
+test_lightmap_regions_tile_the_lump :: proc(t: ^testing.T) {
+	data := build_light_tile_map(2, 3)
+	defer delete(data)
+	ok, regions, covered, total := lightmap_tiling(data, 8)
+	testing.expect(t, ok)
+	testing.expect_value(t, regions, 1)
+	testing.expect_value(t, covered, i64(4 * 3 * 4))
+	testing.expect_value(t, total, i64(4 + 4 * 3 * 4))
+
+	// A region that starts somewhere else than the four bytes after the previous one
+	// is not the region of this face.
+	shifted := build_light_tile_map(2, 3)
+	defer delete(shifted)
+	store_i32(shifted, 1024 + 20, 8)
+	ok2, _, _, _ := lightmap_tiling(shifted, 8)
+	testing.expect(t, !ok2)
+
+	// A lump with four bytes more than the faces explain is not tiled.
+	long := build_light_tile_map(2, 3)
+	defer delete(long)
+	store_i32(long, 8 + 8 * 16 + 4, i32(4 + 4 * 3 * 4 + 4))
+	ok3, _, _, _ := lightmap_tiling(long, 8)
+	testing.expect(t, !ok3)
+
+	// The bump bit of the texinfo doubles nothing by itself, it quadruples the planes.
+	bump := build_light_tile_map(2, 3)
+	defer delete(bump)
+	store_i32(bump, 2048 + 64, 0x800)
+	ok4, _, covered4, _ := lightmap_tiling(bump, 8)
+	testing.expect(t, !ok4)
+	// The four planes are measured even when the region no longer fits the lump.
+	testing.expect_value(t, covered4, i64(4 * 3 * 4 * 4))
+}

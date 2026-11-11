@@ -9,6 +9,7 @@ package bsp
 
 import "core:fmt"
 import "core:slice"
+import "core:sort"
 import "core:strings"
 
 // Source 1 (BSP version 20) lump table, in header order.
@@ -112,6 +113,8 @@ Lump_Audit :: struct {
 	lightmap_blocks:       int,
 	lightmap_attributed:   i64,
 	lightmap_total:        i64,
+	lightmap_tiled:        int, // lighting lumps whose face regions tile them exactly
+	lightmap_lumps:        int, // lighting lumps present
 	// The collision chain is walked solid by solid: these report what the walk
 	// covered, so the claim that the lump is understood and not skipped is a number
 	// on every run.
@@ -148,10 +151,19 @@ audit_lumps :: proc(data: []u8) -> Lump_Audit {
 			length = length,
 		}
 		if i == LUMP_LIGHTING || i == LUMP_LIGHTING_HDR {
-			blocks, attributed := lightmap_coverage(data, i)
-			result.lightmap_blocks += blocks
-			result.lightmap_attributed += attributed
-			result.lightmap_total += i64(length)
+			result.lightmap_lumps += 1
+			tiles, regions, covered, total := lightmap_tiling(data, i)
+			if tiles {
+				result.lightmap_blocks += regions
+				result.lightmap_attributed += covered
+				result.lightmap_total += total
+				result.lightmap_tiled += 1
+			} else {
+				blocks, attributed := lightmap_coverage(data, i)
+				result.lightmap_blocks += blocks
+				result.lightmap_attributed += attributed
+				result.lightmap_total += i64(length)
+			}
 		}
 		if i == LUMP_PHYSCOLLIDE || i == LUMP_PHYSCOLLIDESURFACE {
 			tally := PHYS_Tally{}
@@ -256,9 +268,10 @@ audit_lumps_text :: proc(a: ^Lump_Audit) -> string {
 		fmt.sbprintf(&b, "alignment:       %12d (zero bytes between lumps)\n", a.padding)
 	}
 	if a.lightmap_total > 0 {
-		fmt.sbprintf(&b, "lightmaps:       %12d blocks, %d of %d bytes attributed to a face (%.1f%%)\n",
+		fmt.sbprintf(&b, "lightmaps:       %12d blocks, %d of %d bytes attributed to a face (%.1f%%), %d of %d lump(s) tiled by their regions\n",
 			a.lightmap_blocks, a.lightmap_attributed, a.lightmap_total,
-			percent(a.lightmap_attributed, a.lightmap_total))
+			percent(a.lightmap_attributed, a.lightmap_total),
+			a.lightmap_tiled, a.lightmap_lumps)
 	}
 	if a.phys_models > 0 {
 		fmt.sbprintf(&b, "collision:       %12d model(s), %d solid(s), %d bytes of collide data\n",
@@ -409,6 +422,7 @@ lightmap_coverage :: proc(data: []u8, index: int) -> (blocks: int, attributed: i
 	if faces_length <= 0 || faces_offset <= 0 {
 		return
 	}
+	extra := lightmap_extra_plane(data)
 	for i in 0 ..< faces_length / 56 {
 		face := faces_offset + i * 56
 		if int(read_i32(data, face + 20)) < 0 {
@@ -419,10 +433,131 @@ lightmap_coverage :: proc(data: []u8, index: int) -> (blocks: int, attributed: i
 		if size_x < 0 || size_y < 0 {
 			continue
 		}
-		blocks += 1
-		attributed += i64(size_x + 1) * i64(size_y + 1) * 4
+		styles := 0
+		for s in 0 ..< 4 {
+			if data[face + 16 + s] != 0xff {
+				styles += 1
+			}
+		}
+		if styles == 0 {
+			styles = 1
+		}
+		planes := lightmap_planes_of(data, face) + extra
+		blocks += styles
+		attributed += i64((size_x + 1) * (size_y + 1) * 4) * i64(planes) * i64(styles)
 	}
 	return
+}
+
+// lightmap_planes_of returns the lighting planes a face carries: one, or four when
+// its texinfo sets bit 11 of the texture flags, which is the flag vrad reads to build
+// four bump-mapped lightmaps instead of one. Measured in vrad's BuildSamplesAndLuxels
+// (`uVar6 = flags >> 0xb; if (uVar6 & 1) planes = 4`).
+lightmap_planes_of :: proc(data: []u8, face: int) -> int {
+	texinfo := int(read_i16(data, face + 10))
+	length := lump_int(data, LUMP_TEXINFO, 4)
+	if texinfo < 0 || texinfo * 72 + 68 > length {
+		return 1
+	}
+	flags := u32(read_i32(data, lump_int(data, LUMP_TEXINFO, 0) + texinfo * 72 + 64))
+	return flags & 0x800 != 0 ? 4 : 1
+}
+
+// lightmap_extra_plane returns the plane the writer adds to every face of this map
+// beyond one per style and lighting plane. Measured over the corpus: maps with bit 2
+// of the map flags (lump 59) carry one such plane, the maps without it carry none.
+lightmap_extra_plane :: proc(data: []u8) -> int {
+	offset := lump_int(data, LUMP_MAP_FLAGS, 0)
+	length := lump_int(data, LUMP_MAP_FLAGS, 4)
+	if offset <= 0 || length < 4 {
+		return 0
+	}
+	if u32(read_i32(data, offset)) & 0x4 != 0 {
+		return 1
+	}
+	return 0
+}
+
+// lightmap_tiling reports whether the face regions tile the lighting lump exactly:
+// the first region starts after the four bytes that open the lump, every next one
+// starts where the previous ended, and the last one ends with the lump. A map that
+// fails is reported instead of being credited.
+lightmap_tiling :: proc(data: []u8, index: int) -> (ok: bool, regions: int, covered: i64, total: i64) {
+	faces_lump := LUMP_FACES
+	if index == LUMP_LIGHTING_HDR {
+		faces_lump = LUMP_FACES_HDR
+	}
+	faces_offset := lump_int(data, faces_lump, 0)
+	faces_length := lump_int(data, faces_lump, 4)
+	length := lump_int(data, index, 4)
+	if faces_length <= 0 || length <= 0 {
+		return
+	}
+	total = i64(length)
+	extra := lightmap_extra_plane(data)
+	// One region per face: for every style, four bytes and then the samples of every
+	// lighting plane of that style. The faces are not always written in face order, so
+	// the regions are sorted by the offset they name before the walk.
+	Region :: struct {
+		offset:  i64,
+		span:    i64,
+		samples: i64,
+	}
+	found := make([dynamic]Region, 0, 1024, context.allocator)
+	defer delete(found)
+	for i in 0 ..< faces_length / 56 {
+		face := faces_offset + i * 56
+		light_offset := int(read_i32(data, face + 20))
+		if light_offset < 0 {
+			continue
+		}
+		size_x := int(read_i32(data, face + 36))
+		size_y := int(read_i32(data, face + 40))
+		if size_x < 0 || size_y < 0 {
+			return false, regions, covered, total
+		}
+		styles := 0
+		for s in 0 ..< 4 {
+			if data[face + 16 + s] != 0xff {
+				styles += 1
+			}
+		}
+		if styles == 0 {
+			styles = 1
+		}
+		planes := lightmap_planes_of(data, face) + extra
+		samples := i64(size_x + 1) * i64(size_y + 1) * 4 * i64(planes)
+		append(&found, Region {
+			offset  = i64(light_offset),
+			span    = i64(styles) * (4 + samples),
+			samples = samples * i64(styles),
+		})
+	}
+	slice := found[:]
+	sort.quick_sort_proc(slice, proc(a, b: Region) -> int {
+		if a.offset < b.offset {
+			return -1
+		}
+		if a.offset > b.offset {
+			return 1
+		}
+		return 0
+	})
+	cursor := i64(0)
+	for region in slice {
+		// The four bytes that open each style are the prefix of its samples, so a
+		// region starts four bytes past the end of the previous one.
+		if region.offset != cursor + 4 {
+			return false, regions, covered, total
+		}
+		cursor += region.span
+		covered += region.samples
+		regions += 1
+	}
+	if cursor != total {
+		return false, regions, covered, total
+	}
+	return true, regions, covered, total
 }
 
 // lighting_reason checks the lightmap sample array against the faces that point
