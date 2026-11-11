@@ -972,11 +972,19 @@ visibility_reason :: proc(data: []u8, offset, length: int) -> string {
 		return "cluster table past the lump"
 	}
 	need := (clusters + 7) / 8
+	// The cluster count is the first thing the lump says about itself, and the
+	// leaves are where clusters come from: the largest cluster a leaf belongs to is
+	// the last cluster there is. That ties lump 4 to lump 10 instead of taking the
+	// count on faith.
+	if leaves := leaf_cluster_count(data); leaves >= 0 && leaves != clusters {
+		return "the cluster count is not one more than the largest leaf cluster"
+	}
 	covered := make([]bool, length, context.allocator)
 	defer delete(covered)
 	for i in 0 ..< header {
 		covered[i] = true
 	}
+	padding_high := clusters % 8
 	for i in 0 ..< clusters * 2 {
 		start := int(read_i32(data, offset + 4 + i * 4))
 		if start < header || start >= length {
@@ -984,6 +992,7 @@ visibility_reason :: proc(data: []u8, offset, length: int) -> string {
 		}
 		pos := start
 		produced := 0
+		last := u8(0)
 		for produced < need {
 			if pos >= length {
 				return "run length stream past the lump"
@@ -991,6 +1000,7 @@ visibility_reason :: proc(data: []u8, offset, length: int) -> string {
 			value := int(data[offset + pos])
 			pos += 1
 			if value != 0 {
+				last = u8(value)
 				produced += 1
 			} else {
 				if pos >= length {
@@ -998,11 +1008,20 @@ visibility_reason :: proc(data: []u8, offset, length: int) -> string {
 				}
 				run := int(data[offset + pos])
 				pos += 1
+				if run > 0 {
+					last = 0
+				}
 				produced += run
 			}
 		}
 		if produced != need {
 			return "stream decoded past the bit vector"
+		}
+		// The row is one bit per cluster, so the bits a byte has left over are not
+		// clusters and must be clear. A row that sets them is not a bit vector of
+		// this size.
+		if padding_high != 0 && last >> uint(padding_high) != 0 {
+			return "a bit vector sets bits past the last cluster"
 		}
 		for k in start ..< pos {
 			covered[k] = true
@@ -1014,6 +1033,30 @@ visibility_reason :: proc(data: []u8, offset, length: int) -> string {
 		}
 	}
 	return ""
+}
+
+// leaf_cluster_count returns one more than the largest cluster any leaf belongs to,
+// or -1 when the leaf lump cannot be read.
+leaf_cluster_count :: proc(data: []u8) -> int {
+	offset := lump_int(data, LUMP_LEAFS, 0)
+	length := lump_int(data, LUMP_LEAFS, 4)
+	if offset <= 0 || length <= 0 {
+		return -1
+	}
+	stride := leaf_stride(data)
+	if stride <= 0 || length % stride != 0 {
+		return -1
+	}
+	largest := -1
+	for i in 0 ..< length / stride {
+		// dleaf_t stores the cluster as a signed short at offset 4; the leaf is
+		// -1 for the leaves that belong to no cluster.
+		cluster := int(read_i16(data, offset + i * stride + 4))
+		if cluster > largest {
+			largest = cluster
+		}
+	}
+	return largest + 1
 }
 
 // areas_reason: darea_t, eight bytes: the number of portal references that

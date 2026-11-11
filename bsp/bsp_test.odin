@@ -697,3 +697,52 @@ test_collision_solids_tile_their_model_blob :: proc(t: ^testing.T) {
 	store_u16_bytes(version, 2048 + 16 + 8, 0)
 	testing.expect_value(t, phys_collide_reason(version, 2048, 84), "a solid carries an unknown collide version")
 }
+
+// build_vis_map builds a map with two leaves in two clusters and a visibility lump
+// whose four streams each decode to one byte: the row of a cluster with two clusters
+// is a single byte, so the row is a bit vector of exactly two bits.
+build_vis_map :: proc(row_a, row_b: u8) -> []u8 {
+	data := make([]u8, 4096)
+	store_i32(data, 0, 0x50534256) // VBSP
+	store_i32(data, 4, 20)         // leaf stride 32
+	leaves_offset := 1024
+	vis_offset := 2048
+	// Lump 10 (leafs): two 32 byte leaves, cluster at offset 4.
+	store_i32(data, 8 + 10 * 16, i32(leaves_offset))
+	store_i32(data, 8 + 10 * 16 + 4, 64)
+	store_i32(data, leaves_offset, 0)          // contents
+	store_u16_bytes(data, leaves_offset + 4, 0) // cluster 0
+	store_i32(data, leaves_offset + 32, 0)
+	store_u16_bytes(data, leaves_offset + 36, 1) // cluster 1
+	// Lump 4 (visibility): two clusters, two tables of two offsets, four streams.
+	store_i32(data, 8 + 4 * 16, i32(vis_offset))
+	store_i32(data, 8 + 4 * 16 + 4, 24)
+	store_i32(data, vis_offset, 2) // clusters
+	for i in 0 ..< 4 {
+		store_i32(data, vis_offset + 4 + i * 4, i32(20 + i))
+	}
+	data[vis_offset + 20] = row_a
+	data[vis_offset + 21] = row_b
+	data[vis_offset + 22] = row_a
+	data[vis_offset + 23] = row_b
+	return data
+}
+
+@(test)
+test_visibility_bits_are_counted_against_the_leaves :: proc(t: ^testing.T) {
+	data := build_vis_map(0b11, 0b01)
+	defer delete(data)
+	testing.expect_value(t, visibility_reason(data, 2048, 24), "")
+
+	// A cluster count that the leaves do not explain is not the cluster count.
+	stray := build_vis_map(0b11, 0b01)
+	defer delete(stray)
+	store_i32(stray, 2048, 1)
+	testing.expect_value(t, visibility_reason(stray, 2048, 24), "the cluster count is not one more than the largest leaf cluster")
+
+	// Two clusters leave six bits of the row that name nothing; setting one of them
+	// means the row is not a bit vector over these clusters.
+	padded := build_vis_map(0b11000011, 0b01)
+	defer delete(padded)
+	testing.expect_value(t, visibility_reason(padded, 2048, 24), "a bit vector sets bits past the last cluster")
+}
