@@ -62,6 +62,14 @@ read_sound_node_wave :: proc(
 				ok = false
 				break
 			}
+			// A cooked PC sound is a Vorbis stream, and every inline payload in the
+			// corpus starts with its page header. That is what makes the bulk table a
+			// reading of the bytes instead of a fit: a wrong element count shifts the
+			// next header and the magic stops matching.
+			if size > 4 && string(pkg.data[r.pos:r.pos + 4]) != "OggS" {
+				ok = false
+				break
+			}
 			r.pos += int(size)
 		}
 		if ok && r.pos == head.end_offset {
