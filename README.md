@@ -41,6 +41,7 @@ mapconv inspect  --input <file> [--from <format>]
 mapconv validate --input <file> [--from <format>]
 mapconv extract  --input <file.ccmap|ccpk|bsp|vtf> --output <dir> [--content <dir>]   # DDS/OBJ/SMD/QC, BSP pakfile, or VTF
 mapconv audit    --input <file>   # byte coverage: interprets vs skips, by class
+mapconv inventory --input <dir>   what a tree is made of, group by group, with a digest
 mapconv --version
 ```
 

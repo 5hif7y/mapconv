@@ -34,6 +34,7 @@ Usage:
   mapconv validate --input <file> [--from <format>]
   mapconv extract  --input <file.ccmap|ccpk> --output <dir>   DDS textures + OBJ meshes
   mapconv audit    --input <file>                              byte coverage by class
+  mapconv inventory --input <dir>                              what a tree is made of, group by group
   mapconv --version
 
 Options:
@@ -90,6 +91,12 @@ main :: proc() {
 
 	if args.command == "version" {
 		fmt.printfln("mapconv %s", VERSION)
+		return
+	}
+
+	// inventory walks a directory; every other command reads one file.
+	if args.command == "inventory" {
+		run_inventory(args, "")
 		return
 	}
 
