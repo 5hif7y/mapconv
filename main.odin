@@ -75,10 +75,13 @@ Args :: struct {
 	profile:  string,
 	report:   string,
 	content:  string,
+	corpus:   string,
+	diff:     string,
 	quiet:    bool,
 	objects:  bool,
 	dump:     bool,
 	names:    bool,
+	json:     bool,
 	materials: bool,
 	ok:       bool,
 }
@@ -97,6 +100,13 @@ main :: proc() {
 	// inventory walks a directory; every other command reads one file.
 	if args.command == "inventory" {
 		run_inventory(args, "")
+		return
+	}
+
+	// An audit that measures a tree, or that speaks to a machine, has no single input
+	// file to read first: it goes before the read that every other command needs.
+	if args.command == "audit" && (args.corpus != "" || args.json || args.diff != "") {
+		run_audit_measure(args)
 		return
 	}
 
@@ -144,7 +154,7 @@ parse_args :: proc(argv: []string) -> (args: Args, ok: bool) {
 		flag := argv[i]
 		need_value := proc(flag: string) -> bool {
 			switch flag {
-			case "--input", "--output", "--from", "--to", "--profile", "--report", "--content":
+			case "--input", "--output", "--from", "--to", "--profile", "--report", "--content", "--corpus", "--diff":
 				return true
 			}
 			return false
@@ -181,6 +191,10 @@ parse_args :: proc(argv: []string) -> (args: Args, ok: bool) {
 				args.report = value
 			case "--content":
 				args.content = value
+			case "--corpus":
+				args.corpus = value
+			case "--diff":
+				args.diff = value
 			}
 			continue
 		}
@@ -191,6 +205,8 @@ parse_args :: proc(argv: []string) -> (args: Args, ok: bool) {
 			args.dump = true
 		case "--names":
 			args.names = true
+		case "--json":
+			args.json = true
 		case "--quiet":
 			args.quiet = true
 		case "--no-materials":
@@ -202,7 +218,7 @@ parse_args :: proc(argv: []string) -> (args: Args, ok: bool) {
 		}
 		i += 1
 	}
-	if args.input == "" {
+	if args.input == "" && !(args.command == "audit" && args.corpus != "") {
 		fmt.eprintln("mapconv: --input is required")
 		return args, false
 	}
@@ -599,6 +615,57 @@ run_extract_bsp :: proc(args: Args, text: string) {
 		bsp.material_report_destroy(&report)
 	}
 	print_diagnostics(&diagnostics, args.quiet, args.report)
+}
+
+// run_audit_measure is the audit that a machine reads: one file or a whole tree, a
+// document with the numbers of each, and optionally the comparison with a baseline that
+// turns a regression into a failing exit code.
+run_audit_measure :: proc(args: Args) {
+	files := make([dynamic]Measure, 0, 64, context.allocator)
+	if args.corpus != "" {
+		walk_corpus(args.corpus, &files)
+		sort_measures(files[:])
+	} else {
+		append(&files, measure_one(args.input))
+	}
+	document := measure_document(files[:])
+	// The document holds the same strings the list holds; freeing the list gives the
+	// strings to the document.
+	delete(files)
+
+	// A document on stdout has to be a document and nothing else, so the diff report of
+	// a machine-readable run goes to stderr where it cannot break the reader.
+	document_on_stdout := (args.json || args.output != "") && args.output == ""
+	wrote := true
+	if args.json || args.output != "" {
+		wrote = write_measure_document(&document, args.output)
+	} else {
+		fmt.print(measure_text(&document))
+	}
+	ok := wrote
+	if args.diff != "" {
+		baseline, read_ok := read_measure_document(args.diff)
+		if !read_ok {
+			measure_destroy(&document)
+			os.exit(2)
+		}
+		regressions := diff_documents(&baseline, &document)
+		report := regressions_text(regressions[:])
+		defer delete(report)
+		if document_on_stdout {
+			fmt.eprint(report)
+		} else {
+			fmt.print(report)
+		}
+		if len(regressions) > 0 {
+			ok = false
+		}
+		measure_destroy(&baseline)
+	}
+	measure_destroy(&document)
+	if !ok {
+		os.exit(1)
+	}
 }
 
 // run_audit reports how many bytes of a package the reader interprets.
