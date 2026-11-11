@@ -93,3 +93,37 @@ but the results so far are **not conclusive**:
 
 Until that harness exists, treat in-engine screenshots as exploratory evidence
 only; the byte/asset audits in `AUDIT.md` are the authoritative measurements.
+
+## Coverage as a test: the measurement gate
+
+The unit tests fix what the readers *do*; they cannot see what the corpus *is*, because
+the corpus is 32 GB and does not enter the repository. `mapconv audit` closes that gap by
+turning coverage into a number a command can compare.
+
+```bash
+# Measure a tree and keep the document.
+mapconv audit --corpus <corpus> --json --output baseline.json
+
+# Fail if anything in it regressed since that measurement.
+mapconv audit --corpus <corpus> --json --diff tests/baseline-corpus.json
+```
+
+`tests/baseline-corpus.json` is the measurement of the 629 files this toolkit reads
+(218 `.ccmap`, 320 `.ccpk`, 9 `.u`, 82 `.bsp`): 17,071,078,138 bytes, 17,071,078,136 of
+them attributed, **2 uninterpreted**, 1,165,142 objects, 3,853 lumps, 1,040,883 lightmap
+blocks, 126 lighting lumps tiled, 169,493,560 luxels, 4,234 PhysX convex elements and
+8,989 material shader maps. The run takes about a minute and a half.
+
+What the diff refuses, and why each rule exists:
+
+| Refused | Because |
+| --- | --- |
+| fewer interpreted bytes in a file | the reader stopped explaining bytes it used to explain |
+| more uninterpreted bytes in a file | the residual grew, which is the only number that must never grow |
+| a counter that fell | the same bytes can be consumed while walking fewer of the structures inside them (luxels, lightmap blocks, lumps, PhysX elements, shader maps) |
+| a file measured before and absent now | a corpus that stopped being readable must not read as a smaller corpus |
+
+A file whose size changed is **not** compared: that is a different measurement, not a
+regression. Files are keyed by name *and* size, because the corpus holds two maps called
+`de_nuke.bsp`. A document of an unknown schema is refused rather than compared, since
+numbers whose meaning changed are not numbers that can be compared.

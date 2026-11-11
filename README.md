@@ -218,7 +218,11 @@ Next, in rough order:
 - [ ] Class-scoped property rules and game-specific entity tables.
 - [ ] Entity I/O (Source `target`/`outputs`, Unreal `Event`/`Tag` graphs).
 - [ ] Material profile tables and resource reference resolution.
-- [ ] CLI end-to-end tests and machine-readable (JSON) diagnostics.
+- [x] Machine-readable audit: `mapconv audit --json` writes the numbers a
+      comparison needs, `--corpus` measures a whole tree, and `--diff` fails
+      when coverage fell. `tests/baseline-corpus.json` is the measurement of
+      the 629-file corpus (17,071,078,138 B, 2 uninterpreted): pointing
+      `--diff` at it turns any regression into a non-zero exit.
 - [ ] Review whether the mature IR should become a versioned interchange format.
 
 ## Non-goals for now
