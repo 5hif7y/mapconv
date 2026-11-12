@@ -936,3 +936,17 @@ test_lightmap_luxels_are_counted_from_the_face :: proc(t: ^testing.T) {
 	luxels2, _, _ := lightmap_luxel_range(data2, 8, 7)
 	testing.expect_value(t, luxels2, i64(0))
 }
+
+// The two bytes of cstrike/maps/de_nuke.bsp are the only non-zero gap between lumps in the
+// corpus, and the reason they are not credited is this rule: alignment padding counts only
+// when it is zero. A gap with content is somebody else's bytes.
+@(test)
+test_a_gap_between_lumps_is_padding_only_when_it_is_zero :: proc(t: ^testing.T) {
+	padded := []u8{0, 0, 0, 0}
+	testing.expect_value(t, zero_run(padded, 0, 2), i64(2))
+
+	// One byte of content makes the whole run count for nothing, which is what keeps the
+	// residue of a packer out of the interpretation.
+	content := []u8{0, 0x26, 0xFF, 0}
+	testing.expect_value(t, zero_run(content, 0, 3), i64(0))
+}
