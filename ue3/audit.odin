@@ -51,6 +51,15 @@ Audit :: struct {
 	physx_elements:    int,
 	physx_bytes:       i64,
 	physx_chunk_counts: map[i32]int,
+	// Fractured meshes: the fragments of every mesh that walked, so the audit says how much
+	// of the fracture payload was decoded and not only that the envelope closed.
+	fractured_meshes:         int,
+	fractured_fragments:      i64,
+	fractured_vertices:       i64,
+	fractured_triangles:      i64,
+	fractured_planes:         i64,
+	fractured_exterior_faces: i64,
+	fractured_bytes:          i64,
 }
 
 audit_row :: proc(audit: ^Audit, class_name: string, allocator := context.allocator) -> ^Audit_Row {
@@ -248,12 +257,20 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 			}
 			delete(struct_d.items)
 		case "FracturedStaticMesh":
-			_, fractured_d := read_fractured_static_mesh(pkg, index, allocator)
+			fractured, fractured_d := read_fractured_static_mesh(pkg, index, allocator)
 			if !diag.has_errors(&fractured_d) {
 				interpreted = i64(e.serial_size)
+				audit.fractured_meshes += 1
+				audit.fractured_fragments += i64(fractured.fragments)
+				audit.fractured_vertices += i64(fractured.vertices)
+				audit.fractured_triangles += i64(fractured.triangles)
+				audit.fractured_planes += i64(fractured.planes)
+				audit.fractured_exterior_faces += i64(fractured.exterior_faces)
+				audit.fractured_bytes += i64(fractured.fragment_data)
 			} else if len(fractured_d.items) > 0 {
 				detail = fractured_d.items[0].message
 			}
+			fractured_destroy(&fractured)
 			delete(fractured_d.items)
 		case "UIStyle":
 			_, style_d := read_ui_style(pkg, index, allocator)
@@ -678,6 +695,13 @@ audit_text :: proc(audit: ^Audit) -> string {
 			delete(parts)
 		}
 		strings.write_byte(&b, '\n')
+	}
+	if audit.fractured_meshes > 0 {
+		fmt.sbprintf(&b,
+			"fractured:       %d mesh(es), %d fragment(s), %d hull vertices, %d triangles, %d planes, %d exterior faces, %d bytes of fragment data\n",
+			audit.fractured_meshes, audit.fractured_fragments, audit.fractured_vertices,
+			audit.fractured_triangles, audit.fractured_planes,
+			audit.fractured_exterior_faces, audit.fractured_bytes)
 	}
 	if audit.shader_maps > 0 {
 		fmt.sbprintf(&b, "shader maps:     %d map(s), %d shader reference(s) (%d null), %d bytes",

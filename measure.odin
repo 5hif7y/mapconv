@@ -40,6 +40,8 @@ Measure :: struct {
 	luxels:          i64    `json:"luxels"`,
 	physx_elements:  i64    `json:"physx_elements"`,
 	shader_maps:     i64    `json:"shader_maps"`,
+	fractured_meshes:    i64 `json:"fractured_meshes"`,
+	fractured_fragments: i64 `json:"fractured_fragments"`,
 }
 
 Measure_Document :: struct {
@@ -82,6 +84,8 @@ measure_document :: proc(files: []Measure, allocator := context.allocator) -> Me
 		totals.luxels += file.luxels
 		totals.physx_elements += file.physx_elements
 		totals.shader_maps += file.shader_maps
+		totals.fractured_meshes += file.fractured_meshes
+		totals.fractured_fragments += file.fractured_fragments
 	}
 	document.totals = totals
 	return document
@@ -102,10 +106,11 @@ measure_text :: proc(document: ^Measure_Document) -> string {
 	// The counters are printed because they are what the diff compares: a run that
 	// interprets the same bytes while decoding fewer luxels is not a run that held still.
 	fmt.sbprintf(&b,
-		"classes %d, objects %d, lumps %d (%d refused), lightmap blocks %d, lightmap lumps %d, luxels %d, physx elements %d, shader maps %d\n",
+		"classes %d, objects %d, lumps %d (%d refused), lightmap blocks %d, lightmap lumps %d, luxels %d, physx elements %d, shader maps %d, fractured meshes %d (%d fragments)\n",
 		totals.classes, totals.objects, totals.lumps, totals.lumps_refused,
 		totals.lightmap_blocks, totals.lightmap_lumps, totals.luxels,
-		totals.physx_elements, totals.shader_maps)
+		totals.physx_elements, totals.shader_maps, totals.fractured_meshes,
+		totals.fractured_fragments)
 	return strings.to_string(b)
 }
 
@@ -187,6 +192,8 @@ measure_one :: proc(path: string) -> Measure {
 		}
 	}
 	measure.shader_maps = i64(audit.shader_maps)
+	measure.fractured_meshes = i64(audit.fractured_meshes)
+	measure.fractured_fragments = audit.fractured_fragments
 	measure.physx_elements = i64(audit.physx_elements)
 	delete(audit.rows)
 	delete(audit.objects)
@@ -357,6 +364,8 @@ COUNTERS := [?]Counter {
 	{"luxels"},
 	{"physx_elements"},
 	{"shader_maps"},
+	{"fractured_meshes"},
+	{"fractured_fragments"},
 }
 
 counter_of :: proc(measure: Measure, name: string) -> i64 {
@@ -377,6 +386,10 @@ counter_of :: proc(measure: Measure, name: string) -> i64 {
 		return measure.physx_elements
 	case "shader_maps":
 		return measure.shader_maps
+	case "fractured_meshes":
+		return measure.fractured_meshes
+	case "fractured_fragments":
+		return measure.fractured_fragments
 	}
 	return 0
 }
