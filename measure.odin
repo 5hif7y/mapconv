@@ -42,6 +42,8 @@ Measure :: struct {
 	shader_maps:     i64    `json:"shader_maps"`,
 	fractured_meshes:    i64 `json:"fractured_meshes"`,
 	fractured_fragments: i64 `json:"fractured_fragments"`,
+	speedtree_objects:   i64 `json:"speedtree_objects"`,
+	speedtree_bytes:     i64 `json:"speedtree_bytes"`,
 }
 
 Measure_Document :: struct {
@@ -86,6 +88,8 @@ measure_document :: proc(files: []Measure, allocator := context.allocator) -> Me
 		totals.shader_maps += file.shader_maps
 		totals.fractured_meshes += file.fractured_meshes
 		totals.fractured_fragments += file.fractured_fragments
+		totals.speedtree_objects += file.speedtree_objects
+		totals.speedtree_bytes += file.speedtree_bytes
 	}
 	document.totals = totals
 	return document
@@ -111,6 +115,8 @@ measure_text :: proc(document: ^Measure_Document) -> string {
 		totals.lightmap_blocks, totals.lightmap_lumps, totals.luxels,
 		totals.physx_elements, totals.shader_maps, totals.fractured_meshes,
 		totals.fractured_fragments)
+	fmt.sbprintf(&b, "speedtrees %d (%d bytes of SDK container)\n",
+		totals.speedtree_objects, totals.speedtree_bytes)
 	return strings.to_string(b)
 }
 
@@ -194,6 +200,8 @@ measure_one :: proc(path: string) -> Measure {
 	measure.shader_maps = i64(audit.shader_maps)
 	measure.fractured_meshes = i64(audit.fractured_meshes)
 	measure.fractured_fragments = audit.fractured_fragments
+	measure.speedtree_objects = i64(audit.speedtree_objects)
+	measure.speedtree_bytes = audit.speedtree_bytes
 	measure.physx_elements = i64(audit.physx_elements)
 	delete(audit.rows)
 	delete(audit.objects)
@@ -366,6 +374,8 @@ COUNTERS := [?]Counter {
 	{"shader_maps"},
 	{"fractured_meshes"},
 	{"fractured_fragments"},
+	{"speedtree_objects"},
+	{"speedtree_bytes"},
 }
 
 counter_of :: proc(measure: Measure, name: string) -> i64 {
@@ -390,6 +400,10 @@ counter_of :: proc(measure: Measure, name: string) -> i64 {
 		return measure.fractured_meshes
 	case "fractured_fragments":
 		return measure.fractured_fragments
+	case "speedtree_objects":
+		return measure.speedtree_objects
+	case "speedtree_bytes":
+		return measure.speedtree_bytes
 	}
 	return 0
 }

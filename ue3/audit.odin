@@ -60,6 +60,10 @@ Audit :: struct {
 	fractured_planes:         i64,
 	fractured_exterior_faces: i64,
 	fractured_bytes:          i64,
+	// SpeedTree: how many payloads are the SDK container and how many bytes that is, so
+	// the claim "all of them take the legacy path" is a number on every run.
+	speedtree_objects: int,
+	speedtree_bytes:   i64,
 }
 
 audit_row :: proc(audit: ^Audit, class_name: string, allocator := context.allocator) -> ^Audit_Row {
@@ -433,9 +437,13 @@ audit_package :: proc(pkg: ^Package, allocator := context.allocator) -> (audit: 
 			}
 			delete(pai_d.items)
 		case "SpeedTree":
-			_, st_d := read_speed_tree(pkg, index, allocator)
+			tree, st_d := read_speed_tree(pkg, index, allocator)
 			if !diag.has_errors(&st_d) {
 				interpreted = i64(e.serial_size)
+				audit.speedtree_objects += 1
+				audit.speedtree_bytes += i64(tree.payload)
+			} else if len(st_d.items) > 0 {
+				detail = st_d.items[0].message
 			}
 			delete(st_d.items)
 		case "BrushComponent":
@@ -695,6 +703,10 @@ audit_text :: proc(audit: ^Audit) -> string {
 			delete(parts)
 		}
 		strings.write_byte(&b, '\n')
+	}
+	if audit.speedtree_objects > 0 {
+		fmt.sbprintf(&b, "speedtrees:      %d object(s), %d bytes of SDK container (%s), 0 structured\n",
+			audit.speedtree_objects, audit.speedtree_bytes, SPEEDTREE_SIGNATURE)
 	}
 	if audit.fractured_meshes > 0 {
 		fmt.sbprintf(&b,
