@@ -227,7 +227,15 @@ audit_lumps :: proc(data: []u8) -> Lump_Audit {
 // padding_bytes measures the bytes no lump claims and that are zero. Every lump
 // starts on a four byte boundary, so the writer leaves up to three bytes between
 // them; anything that is not zero stays in the residual, so a gap with content can
-// never be credited by accident. Spans are sorted here because the lump table is
+// never be credited by accident.
+//
+// The corpus has exactly one such gap: two bytes (26 ff) in cstrike/maps/de_nuke.bsp,
+// between lump 47 and lump 37, and they stay in the residual. Measured, they are not part
+// of the format: repacking that same map with the bspzip that ships in this install
+// (bspzip -game ... -repack) removes them -- the file grows by 1039 bytes of other
+// padding and every lump stays byte for byte -- and the repacked file reads with zero
+// uninterpreted bytes. So the two bytes are residue of whatever packer wrote the map, not
+// a field a reader could name. Spans are sorted here because the lump table is
 // in id order, not in file order.
 padding_bytes :: proc(data: []u8, spans_in: [][2]int) -> i64 {
 	spans := make([][2]int, len(spans_in), context.allocator)
