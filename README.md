@@ -220,6 +220,10 @@ Next, in rough order:
 - [ ] Class-scoped property rules and game-specific entity tables.
 - [ ] Entity I/O (Source `target`/`outputs`, Unreal `Event`/`Tag` graphs).
 - [ ] Material profile tables and resource reference resolution.
+- [x] Game smoke test: `tools/game_smoke.py` launches CrimeCraft (offline mission, the
+      command line from `CC-Offline-Server.bat`) or CSSO with a map, waits for it to load,
+      captures the window and judges the frame. `tools/unrequire_admin.py` removes
+      CrimeCraft's administrator requirement from its manifest, with a backup.
 - [x] Checksum verification: `mapconv verify` reads every entry of a VPK or of a
       map's pakfile and compares the CRC32 the file claims with the bytes it has.
       The whole corpus (186 files, 303,718 entries) verifies in three minutes.

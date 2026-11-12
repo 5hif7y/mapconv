@@ -127,3 +127,62 @@ A file whose size changed is **not** compared: that is a different measurement, 
 regression. Files are keyed by name *and* size, because the corpus holds two maps called
 `de_nuke.bsp`. A document of an unknown schema is refused rather than compared, since
 numbers whose meaning changed are not numbers that can be compared.
+
+## Does the map actually run? The game smoke test
+
+`tools/game_smoke.py` launches a game with a map, waits for the map to load, captures the
+window and turns the frame into a verdict, so "the map works" stops being a person looking
+at a window.
+
+Each profile carries the command line the game itself ships, so the test runs the map the
+way the game runs it:
+
+| Game | Source of the command line | Command |
+| --- | --- | --- |
+| CrimeCraft | `CC-Offline-Server.bat` (the offline mission) | `Binaries\CrimeCraft.exe arena01_solo_all?game=CrimeCraft.CCSoloGameInfo?MinNetPlayers=1?GoalScore=25?WarmupTime=0?TimeLimit=30?PlayersMustBeReady=true?listen -updateinisauto -skipscriptoutdatedness -nostartupmovies -nosplash` |
+| CrimeCraft | `CC-Offline-Server - testing.bat` (the hub, which shows the menu) | `EntryLevel?game=CrimeCraft.CCOfflineGameInfo?...` |
+| CrimeCraft | `CC-Launch.bat` (online, needs the server) | `-OVERRIDEYAKAADDRESS -YAKAADDRESS=… -YAKAPORT=5555 -LANG=INT` |
+| CrimeCraft | `CC-Editor.bat` | `Binaries\CrimeCraft.exe editor` |
+| CSSO | its own launcher | `csso_win64.exe -game csso -novid -windowed -w 1280 -h 720 -condebug +sv_cheats 1 +map <map>` |
+
+```bash
+python3 tools/game_smoke.py --game crimecraft --list          # 218 maps
+python3 tools/game_smoke.py --game crimecraft --map Arena01_Solo_all --shot cc.bmp --json cc.json
+python3 tools/game_smoke.py --game csso --map cs_assault --shot csso.bmp
+python3 tools/game_smoke.py --game csso --compile-vmf out.vmf --shot w.bmp   # vmf -> vbsp -> game
+```
+
+Measured on this machine: CrimeCraft's offline mission loads in about 30 s and CSSO's
+`cs_assault` in about 2 minutes; both capture a rendered frame. Exit code 0 means loaded,
+captured and judged; 1 means it failed at one of those; 2 means it was asked for something it
+cannot do (a running instance, a map that does not exist, an exe that still asks for
+elevation).
+
+### Two things that had to be learned, not guessed
+
+1. **CrimeCraft's manifest demanded administrator rights.** `Binaries\CrimeCraft.exe` and
+   `ClientLauncher.exe` embed `<requestedExecutionLevel level="requireAdministrator">`, so
+   every start waited in front of a UAC prompt and no harness could launch it unattended.
+   `tools/unrequire_admin.py` rewrites the level to `asInvoker` in place, keeping the byte
+   length (the manifest lives in a PE resource whose size is declared elsewhere), validates
+   that the patched manifest still parses as XML, and keeps a `.require-admin.bak` next to
+   the original. `--restore` puts it back:
+
+   ```bash
+   python3 tools/unrequire_admin.py --exe "<root>/Binaries/CrimeCraft.exe"   # patch once
+   python3 tools/unrequire_admin.py --exe "<root>/Binaries/CrimeCraft.exe" --restore
+   ```
+
+   The first attempt padded the attribute with an XML comment, which is not legal inside a
+   start tag: Windows answered "side-by-side configuration is incorrect". The whitespace
+   padding that replaced it parses, and the game starts without a prompt.
+
+2. **`tasklist` cannot be used as a liveness poll here.** With the game's protection driver
+   loaded it can block for minutes; a two second poll loop turned a two minute wait into
+   sixteen. The harness asks `Get-Process` once per check (a fraction of a second) and waits
+   for the window inside a single PowerShell call.
+
+What the smoke test does **not** prove: CrimeCraft's briefing waits for the fire button, and
+a synthetic click does not start the round (the game ignores it), so the frame it judges is
+the briefing — map loaded, HUD drawn — and not gameplay. Starting the round automatically
+needs the game's own input path, which is still open.
